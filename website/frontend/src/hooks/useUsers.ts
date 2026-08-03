@@ -1,0 +1,33 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as usersApi from '@/api/users';
+import type { UserFilters } from '@/api/users';
+
+export const useUsersList = (filters: UserFilters) =>
+  useQuery({ queryKey: ['users', filters], queryFn: () => usersApi.fetchUsers(filters) });
+
+export const useUserDetail = (id: string) =>
+  useQuery({ queryKey: ['users', id], queryFn: () => usersApi.fetchUserDetail(id), enabled: !!id });
+
+export const useBlockUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: usersApi.blockUser,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+};
+
+export const useUnblockUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: usersApi.unblockUser,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+};
+
+export const useVerifyUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: usersApi.verifyUser,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+};

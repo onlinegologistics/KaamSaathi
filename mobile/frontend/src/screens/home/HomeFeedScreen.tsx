@@ -1,0 +1,849 @@
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { View, Text, Image, FlatList, StyleSheet, ActivityIndicator, RefreshControl, Modal, Pressable } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Location from 'expo-location';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { CompositeNavigationProp } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { theme } from '../../theme';
+import { ScreenContainer } from '../../components/ScreenContainer';
+import { JobCard } from '../../components/JobCard';
+import { AnnouncementModal } from '../../components/AnnouncementModal';
+import { LocationPickerModal } from '../../components/LocationPickerModal';
+import { WelcomeModal } from '../../components/WelcomeModal';
+import { categories } from '../../data/categories';
+import { listJobs } from '../../services/api';
+import { toJobViewModel } from '../../utils/jobAdapter';
+import { Job, JobCategory } from '../../types';
+import { useApp } from '../../context/AppContext';
+import { HomeStackParamList, MainTabParamList } from '../../navigation/types';
+
+type HomeFeedNavigation = CompositeNavigationProp<
+  NativeStackScreenProps<HomeStackParamList, 'HomeFeed'>['navigation'],
+  BottomTabNavigationProp<MainTabParamList>
+>;
+
+type Props = {
+  navigation: HomeFeedNavigation;
+};
+
+const PAGE_SIZE = 10;
+
+// The greeting row, location and search bar sit outside the list so the whole
+// header stays put while the feed scrolls underneath it.
+
+// Banner art framing, tuned to the bundled hero (1823x863, worker on the right).
+// All fixed pixels on purpose: a percentage height plus aspectRatio makes the
+// image's width depend on a height that depends on the image, and the card
+// grows without bound.
+// "Nigdi, Pimpri-Chinchwad" — locality first, then the wider city. Fields are
+// inconsistently populated per device, so each slot falls back a level.
+const formatPlace = (place: Location.LocationGeocodedAddress): string => {
+  const locality = place.district || place.name || place.street;
+  const city = place.city || place.subregion || place.region;
+  const parts = [locality, city].filter((p): p is string => !!p && p.trim().length > 0);
+  return Array.from(new Set(parts)).join(', ');
+};
+
+const BANNER_HEIGHT = 172;
+const HERO_SLOT_WIDTH = 128;
+const HERO_IMAGE_WIDTH = Math.round(BANNER_HEIGHT * (1823 / 863)); // 363
+const HERO_FOCUS_OFFSET = 178;
+
+export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
+  const {
+    t,
+    accessToken,
+    currentUser,
+    applyToJob,
+    updateProfile,
+    remoteSettings,
+    shouldShowAnnouncement,
+    dismissAnnouncement,
+    welcome,
+    dismissWelcome,
+    logout,
+  } = useApp();
+  const [category, setCategory] = useState<JobCategory | 'all'>('all');
+  const [page, setPage] = useState(1);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | undefined>();
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  const [detectedLabel, setDetectedLabel] = useState<string | null>(null);
+  const manualPickRef = useRef(false);
+
+  // Ask on open, then turn the fix into a readable place name for the header.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (!permission.granted || cancelled) return;
+
+        const pos = await Location.getCurrentPositionAsync({});
+        if (cancelled) return;
+        const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+        setUserLocation(coords);
+
+        const [place] = await Location.reverseGeocodeAsync(coords);
+        // A location the user picked by hand outranks whatever GPS resolves to.
+        if (cancelled || !place || manualPickRef.current) return;
+        const label = formatPlace(place);
+        if (label) setDetectedLabel(label);
+      } catch {
+        // Location is a nicety here — the feed still works without it.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fetchJobs = useCallback(
+    async (targetPage: number) => {
+      if (!accessToken) return;
+      setLoading(true);
+      try {
+        const res = await listJobs(accessToken, {
+          category: category !== 'all' ? category : undefined,
+          status: 'open',
+          page: targetPage,
+          limit: PAGE_SIZE,
+        });
+        const mapped = res.data.map((job) => toJobViewModel(job, userLocation));
+        setJobs((prev) => (targetPage === 1 ? mapped : [...prev, ...mapped]));
+        setHasMore(targetPage < res.pagination.pages);
+        setPage(targetPage);
+      } catch {
+        // best-effort — keep whatever was already loaded
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [accessToken, category, userLocation]
+  );
+
+  useEffect(() => {
+    fetchJobs(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, category, userLocation]);
+
+  const handleLoadMore = useCallback(() => {
+    if (hasMore && !loading) fetchJobs(page + 1);
+  }, [hasMore, loading, page, fetchJobs]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchJobs(1);
+  }, [fetchJobs]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: Job }) => (
+      <JobCard
+        job={item}
+        onPress={() => navigation.navigate('JobDetail', { jobId: item.id })}
+        onApply={() => applyToJob(item.id)}
+      />
+    ),
+    [navigation, applyToJob]
+  );
+
+  // Saving from here sends the rest of the profile back untouched so a location
+  // change can't blank out fields the user set elsewhere.
+  const handleLocationSave = useCallback(
+    async (location: { latitude: number; longitude: number; label: string }) => {
+      setLocationPickerVisible(false);
+      manualPickRef.current = true;
+      setDetectedLabel(location.label);
+      if (!currentUser) return;
+      try {
+        await updateProfile({
+          name: currentUser.name,
+          avatar: currentUser.avatar,
+          email: currentUser.email,
+          dateOfBirth: currentUser.dateOfBirth,
+          education: currentUser.education,
+          currentAddress: currentUser.currentAddress,
+          location,
+        });
+      } catch {
+        // Non-blocking — the feed keeps working with the previous location.
+      }
+    },
+    [currentUser, updateProfile]
+  );
+
+  const heroImageSource = remoteSettings['mobile.home.heroImageUrl']
+    ? { uri: remoteSettings['mobile.home.heroImageUrl'] }
+    : require('../../../assets/home-hero-worker.png');
+
+  // GPS wins on open; a hand-picked location replaces it for the session.
+  const locationLabel = detectedLabel ?? currentUser?.location?.label;
+
+  return (
+    <ScreenContainer edges={['top', 'left', 'right']} style={styles.container}>
+      <View style={styles.stickyHeader}>
+        <View style={styles.greetingRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Menu"
+            onPress={() => setMenuVisible(true)}
+            style={styles.menuBtn}
+          >
+            <MaterialCommunityIcons name="menu" size={24} color={theme.colors.text} />
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Change location"
+            onPress={() => setLocationPickerVisible(true)}
+            style={({ pressed }) => [styles.greetingCopy, pressed && styles.pressed]}
+          >
+            <View style={styles.locationRow}>
+              <MaterialCommunityIcons name="map-marker" size={15} color={theme.colors.primary} />
+              <Text style={styles.locationText} numberOfLines={1}>
+                {locationLabel || 'Set your location'}
+              </Text>
+              <MaterialCommunityIcons name="chevron-down" size={17} color={theme.colors.textMuted} />
+            </View>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Notifications"
+            onPress={() => setNotificationsVisible(true)}
+            style={styles.headerIconBtn}
+          >
+            <MaterialCommunityIcons name="bell-outline" size={24} color={theme.colors.text} />
+            <View style={styles.bellDot} />
+          </Pressable>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('search')}
+          onPress={() => navigation.navigate('Search')}
+          style={styles.searchBar}
+        >
+          <MaterialCommunityIcons name="magnify" size={22} color={theme.colors.primary} />
+          <Text style={styles.searchPlaceholder} numberOfLines={1}>
+            Search jobs, skills or people...
+          </Text>
+          <MaterialCommunityIcons name="map-marker-outline" size={20} color={theme.colors.primary} />
+        </Pressable>
+      </View>
+
+      <FlatList
+        ListHeaderComponent={
+          <>
+            <LinearGradient
+              colors={[theme.colors.bannerStart, theme.colors.bannerEnd]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.banner}
+            >
+              <View style={styles.bannerCopy}>
+                <Text style={styles.bannerTitle}>Find Trusted</Text>
+                <Text style={styles.bannerTitleStrong}>Professionals</Text>
+                <Text style={styles.bannerTitle}>For Any Work</Text>
+
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('postJob')}
+                  onPress={() => navigation.navigate('PostTab', { screen: 'PostJob' })}
+                  style={({ pressed }) => [styles.bannerCta, pressed && styles.pressed]}
+                >
+                  <Text style={styles.bannerCtaText}>Post a Job</Text>
+                  <MaterialCommunityIcons name="arrow-right" size={18} color={theme.colors.textInverse} />
+                </Pressable>
+              </View>
+
+              <View style={styles.bannerImageWrap}>
+                <Image source={heroImageSource} style={styles.bannerImage} />
+              </View>
+            </LinearGradient>
+
+            <View style={styles.categoryGrid}>
+              {categories.map((cat) => (
+                <Pressable
+                  key={cat.key}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(cat.labelKey)}
+                  onPress={() => setCategory((prev) => (prev === cat.key ? 'all' : cat.key))}
+                  style={styles.categoryItem}
+                >
+                  <View style={[styles.categoryTile, category === cat.key && styles.categoryTileActive]}>
+                    <MaterialCommunityIcons
+                      name={cat.icon as keyof typeof MaterialCommunityIcons.glyphMap}
+                      size={26}
+                      color={cat.color}
+                    />
+                  </View>
+                  <Text style={styles.categoryLabel} numberOfLines={1}>
+                    {t(cat.labelKey)}
+                  </Text>
+                </Pressable>
+              ))}
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('more')}
+                onPress={() => navigation.navigate('Search')}
+                style={styles.categoryItem}
+              >
+                <View style={styles.categoryTile}>
+                  <MaterialCommunityIcons name="dots-horizontal" size={26} color={theme.colors.textMuted} />
+                </View>
+                <Text style={styles.categoryLabel} numberOfLines={1}>
+                  {t('more')}
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Popular Services</Text>
+              <Pressable accessibilityRole="button" onPress={() => navigation.navigate('Search')}>
+                <Text style={styles.seeAll}>View All</Text>
+              </Pressable>
+            </View>
+
+            {jobs.length > 0 ? (
+              <FlatList
+                horizontal
+                data={jobs.slice(0, 8)}
+                keyExtractor={(item) => `service-${item.id}`}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.serviceRow}
+                renderItem={({ item }) => (
+                  <ServiceCard job={item} onPress={() => navigation.navigate('JobDetail', { jobId: item.id })} />
+                )}
+              />
+            ) : null}
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recommended for you</Text>
+            </View>
+          </>
+        }
+        data={jobs}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.4}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[theme.colors.primary]} />}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <MaterialCommunityIcons name="briefcase-search-outline" size={48} color={theme.colors.textMuted} />
+            <Text style={styles.emptyText}>{t('noResults')}</Text>
+          </View>
+        }
+        ListFooterComponent={
+          hasMore ? (
+            <View style={styles.footerLoader}>
+              <ActivityIndicator color={theme.colors.primary} />
+            </View>
+          ) : (
+            <View style={styles.footerSpace} />
+          )
+        }
+      />
+
+      <WelcomeModal
+        visible={!!welcome}
+        name={welcome?.name ?? ''}
+        isNewUser={welcome?.isNewUser ?? false}
+        onClose={dismissWelcome}
+      />
+
+      <LocationPickerModal
+        visible={locationPickerVisible}
+        initialLocation={currentUser?.location ?? null}
+        onClose={() => setLocationPickerVisible(false)}
+        onConfirm={handleLocationSave}
+      />
+
+      {remoteSettings['mobile.loginAnnouncement'] ? (
+        <AnnouncementModal
+          visible={shouldShowAnnouncement}
+          announcement={remoteSettings['mobile.loginAnnouncement']}
+          onClose={dismissAnnouncement}
+        />
+      ) : null}
+
+      <Modal
+        visible={notificationsVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNotificationsVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setNotificationsVisible(false)}>
+          <Pressable style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Notifications</Text>
+              <Pressable accessibilityRole="button" onPress={() => setNotificationsVisible(false)} style={styles.closeButton}>
+                <MaterialCommunityIcons name="close" size={22} color={theme.colors.text} />
+              </Pressable>
+            </View>
+            <NotificationRow
+              icon="briefcase-check-outline"
+              title="New jobs near you"
+              body="Fresh work has been posted around your selected area."
+            />
+            <NotificationRow
+              icon="bell-ring-outline"
+              title="Job alerts are active"
+              body="We will notify you when matching jobs are available."
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={menuVisible} transparent animationType="slide" onRequestClose={() => setMenuVisible(false)}>
+        <Pressable style={styles.sheetOverlay} onPress={() => setMenuVisible(false)}>
+          <Pressable style={styles.menuSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.menuTitle}>Menu</Text>
+            <MenuAction
+              icon="plus-circle-outline"
+              label="Post a Job"
+              onPress={() => {
+                setMenuVisible(false);
+                navigation.navigate('PostTab', { screen: 'PostJob' });
+              }}
+            />
+            <MenuAction
+              icon="chat-processing-outline"
+              label={t('navChat')}
+              onPress={() => {
+                setMenuVisible(false);
+                navigation.navigate('ChatTab', { screen: 'ChatList' });
+              }}
+            />
+            <MenuAction
+              icon="account-circle-outline"
+              label={t('navProfile')}
+              onPress={() => {
+                setMenuVisible(false);
+                navigation.navigate('ProfileTab', { screen: 'ProfileMain' });
+              }}
+            />
+            <MenuAction
+              icon="logout"
+              label={t('logout')}
+              destructive
+              onPress={() => {
+                setMenuVisible(false);
+                logout();
+              }}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </ScreenContainer>
+  );
+};
+
+const ServiceCard: React.FC<{ job: Job; onPress: () => void }> = ({ job, onPress }) => {
+  const meta = categories.find((c) => c.key === job.category) ?? categories[0];
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={job.title}
+      onPress={onPress}
+      style={({ pressed }) => [styles.serviceCard, pressed && styles.pressed]}
+    >
+      <View style={[styles.serviceThumb, { backgroundColor: `${meta.color}1A` }]}>
+        <MaterialCommunityIcons
+          name={meta.icon as keyof typeof MaterialCommunityIcons.glyphMap}
+          size={38}
+          color={meta.color}
+        />
+      </View>
+      <Text style={styles.serviceTitle} numberOfLines={1}>
+        {job.title}
+      </Text>
+      <Text style={styles.servicePrice}>{`From ₹${job.pay}`}</Text>
+    </Pressable>
+  );
+};
+
+const NotificationRow: React.FC<{ icon: keyof typeof MaterialCommunityIcons.glyphMap; title: string; body: string }> = ({
+  icon,
+  title,
+  body,
+}) => (
+  <View style={styles.notificationRow}>
+    <View style={styles.notificationIcon}>
+      <MaterialCommunityIcons name={icon} size={22} color={theme.colors.primary} />
+    </View>
+    <View style={styles.notificationCopy}>
+      <Text style={styles.notificationTitle}>{title}</Text>
+      <Text style={styles.notificationBody}>{body}</Text>
+    </View>
+  </View>
+);
+
+const MenuAction: React.FC<{
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  destructive?: boolean;
+  onPress: () => void;
+}> = ({ icon, label, destructive, onPress }) => (
+  <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.menuAction, pressed && styles.pressed]}>
+    <MaterialCommunityIcons name={icon} size={23} color={destructive ? theme.colors.danger : theme.colors.text} />
+    <Text style={[styles.menuActionText, destructive && styles.menuActionTextDestructive]}>{label}</Text>
+    <MaterialCommunityIcons name="chevron-right" size={22} color={theme.colors.textMuted} />
+  </Pressable>
+);
+
+const styles = StyleSheet.create({
+  container: {
+    paddingTop: 0,
+  },
+  stickyHeader: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.sm,
+    backgroundColor: theme.colors.background,
+    zIndex: 10,
+  },
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xs,
+  },
+  menuBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  greetingCopy: {
+    flex: 1,
+    marginLeft: theme.spacing.sm,
+    marginRight: theme.spacing.xs,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  locationText: {
+    ...theme.typography.bodyBold,
+    color: theme.colors.text,
+    fontSize: 16,
+    flexShrink: 1,
+  },
+  bellDot: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: theme.colors.danger,
+    borderWidth: 1.5,
+    borderColor: theme.colors.surface,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.pill,
+    paddingHorizontal: theme.spacing.md,
+    minHeight: 52,
+    shadowColor: theme.colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 2,
+  },
+  searchPlaceholder: {
+    ...theme.typography.body,
+    color: theme.colors.textMuted,
+    flex: 1,
+  },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: BANNER_HEIGHT,
+    marginHorizontal: theme.spacing.lg,
+    marginTop: theme.spacing.sm,
+    borderRadius: theme.radius.xl,
+    overflow: 'hidden',
+  },
+  bannerCopy: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingLeft: theme.spacing.lg,
+    paddingRight: theme.spacing.xs,
+    paddingVertical: theme.spacing.md,
+  },
+  bannerTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    lineHeight: 25,
+    color: '#5A2E10',
+  },
+  bannerTitleStrong: {
+    fontSize: 23,
+    fontWeight: '800',
+    lineHeight: 29,
+    color: '#3D1B06',
+  },
+  bannerCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: theme.spacing.sm,
+    backgroundColor: theme.colors.primary,
+    borderRadius: theme.radius.pill,
+    paddingHorizontal: theme.spacing.md,
+    minHeight: 42,
+  },
+  bannerCtaText: {
+    ...theme.typography.button,
+    color: theme.colors.textInverse,
+  },
+  // Fills the card's full height and right edge; the card's radius clips it.
+  bannerImageWrap: {
+    width: HERO_SLOT_WIDTH,
+    height: BANNER_HEIGHT,
+    overflow: 'hidden',
+  },
+  bannerImage: {
+    width: HERO_IMAGE_WIDTH,
+    height: BANNER_HEIGHT,
+    // The wide art is pulled left so the worker, who sits in its right third,
+    // lands centred in this narrow slot.
+    marginLeft: -HERO_FOCUS_OFFSET,
+    resizeMode: 'cover',
+  },
+  categoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.lg,
+  },
+  categoryItem: {
+    width: '22%',
+    alignItems: 'center',
+    gap: 6,
+  },
+  categoryTile: {
+    width: 58,
+    height: 58,
+    borderRadius: theme.radius.lg,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: theme.colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  categoryTileActive: {
+    borderWidth: 2,
+    borderColor: theme.colors.primary,
+  },
+  categoryLabel: {
+    ...theme.typography.tiny,
+    color: theme.colors.text,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.xl,
+    paddingBottom: theme.spacing.sm,
+  },
+  sectionTitle: {
+    ...theme.typography.h3,
+    color: theme.colors.text,
+  },
+  seeAll: {
+    ...theme.typography.body,
+    color: theme.colors.primary,
+    fontWeight: '700',
+  },
+  serviceRow: {
+    paddingHorizontal: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
+  serviceCard: {
+    width: 150,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.lg,
+    padding: theme.spacing.xs,
+    shadowColor: theme.colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 2,
+  },
+  serviceThumb: {
+    height: 92,
+    borderRadius: theme.radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  serviceTitle: {
+    ...theme.typography.bodyBold,
+    color: theme.colors.text,
+    marginTop: theme.spacing.xs,
+    marginHorizontal: 4,
+  },
+  servicePrice: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+    marginTop: 2,
+    marginHorizontal: 4,
+    marginBottom: 4,
+  },
+  listContent: {
+    paddingBottom: 92,
+  },
+  empty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: theme.spacing.xxxl,
+    gap: theme.spacing.sm,
+  },
+  emptyText: {
+    ...theme.typography.bodyLg,
+    color: theme.colors.textMuted,
+  },
+  footerLoader: {
+    paddingVertical: theme.spacing.lg,
+  },
+  footerSpace: {
+    height: theme.spacing.xl,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: theme.colors.overlay,
+    paddingHorizontal: theme.spacing.lg,
+    justifyContent: 'center',
+  },
+  modalCard: {
+    borderRadius: theme.radius.lg,
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.lg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.md,
+  },
+  modalTitle: {
+    ...theme.typography.h2,
+    color: theme.colors.text,
+  },
+  closeButton: {
+    width: theme.MIN_TAP_TARGET,
+    height: theme.MIN_TAP_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationRow: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+    paddingVertical: theme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.divider,
+  },
+  notificationIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: theme.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationCopy: {
+    flex: 1,
+  },
+  notificationTitle: {
+    ...theme.typography.bodyBold,
+    color: theme.colors.text,
+  },
+  notificationBody: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    marginTop: 3,
+  },
+  sheetOverlay: {
+    flex: 1,
+    backgroundColor: theme.colors.overlay,
+    justifyContent: 'flex-end',
+  },
+  menuSheet: {
+    backgroundColor: theme.colors.surface,
+    borderTopLeftRadius: theme.radius.xl,
+    borderTopRightRadius: theme.radius.xl,
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.sm,
+    paddingBottom: theme.spacing.xxl,
+  },
+  sheetHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: theme.colors.border,
+    alignSelf: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  menuTitle: {
+    ...theme.typography.h2,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.sm,
+  },
+  menuAction: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.divider,
+  },
+  menuActionText: {
+    flex: 1,
+    ...theme.typography.bodyBold,
+    color: theme.colors.text,
+  },
+  menuActionTextDestructive: {
+    color: theme.colors.danger,
+  },
+  pressed: {
+    opacity: 0.72,
+  },
+});

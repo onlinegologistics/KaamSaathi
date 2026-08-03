@@ -1,0 +1,36 @@
+const { Joi, objectId } = require('./common');
+
+const createCategorySchema = Joi.object({
+  body: Joi.object({
+    name: Joi.string().trim().min(2).max(60).required(),
+    key: Joi.string().trim().lowercase().min(2).max(60).required(),
+    icon: Joi.string().trim().max(60).allow(''),
+    color: Joi.string().trim().max(30).allow(''),
+    sortOrder: Joi.number().integer(),
+  }).required(),
+  query: Joi.object({}),
+  params: Joi.object({}),
+});
+
+const updateCategorySchema = Joi.object({
+  body: Joi.object({
+    name: Joi.string().trim().min(2).max(60),
+    icon: Joi.string().trim().max(60).allow(''),
+    color: Joi.string().trim().max(30).allow(''),
+    sortOrder: Joi.number().integer(),
+  }).min(1).required(),
+  query: Joi.object({}),
+  params: Joi.object({
+    id: objectId.required(),
+  }).required(),
+});
+
+const categoryIdSchema = Joi.object({
+  body: Joi.object({}),
+  query: Joi.object({}),
+  params: Joi.object({
+    id: objectId.required(),
+  }).required(),
+});
+
+module.exports = { createCategorySchema, updateCategorySchema, categoryIdSchema };

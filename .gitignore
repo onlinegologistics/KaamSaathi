@@ -11,6 +11,7 @@ expo-env.d.ts
 
 # Native
 .kotlin/
+*.apk
 *.orig.*
 *.jks
 *.p8
@@ -25,6 +26,7 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+.local-mongo/
 
 # macOS
 .DS_Store

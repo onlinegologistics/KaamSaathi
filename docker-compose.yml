@@ -19,14 +19,12 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5000
-      - MONGO_URI=mongodb://mongodb:27017/kaamsaathi
+      - MONGO_URI=${MONGO_URI:-mongodb+srv://KaamSaathi:hospital123@kaamsaathi.jf52n0x.mongodb.net/kaamsaathi?retryWrites=true&w=majority}
       - JWT_ACCESS_SECRET=${MOBILE_JWT_ACCESS_SECRET:-mobile-access-secret-kaamsaathi-prod-2026}
       - JWT_REFRESH_SECRET=${MOBILE_JWT_REFRESH_SECRET:-mobile-refresh-secret-kaamsaathi-prod-2026}
       - JWT_ACCESS_EXPIRES_IN=15m
       - JWT_REFRESH_EXPIRES_IN=7d
       - CORS_ORIGIN=*
-    depends_on:
-      - mongodb
     networks:
       - kaamsaathi-net
 
@@ -39,14 +37,12 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5001
-      - MONGO_URI=mongodb://mongodb:27017/kaamsaathi
+      - MONGO_URI=${MONGO_URI:-mongodb+srv://KaamSaathi:hospital123@kaamsaathi.jf52n0x.mongodb.net/kaamsaathi?retryWrites=true&w=majority}
       - JWT_ACCESS_SECRET=${WEB_JWT_ACCESS_SECRET:-web-access-secret-kaamsaathi-prod-2026}
       - JWT_REFRESH_SECRET=${WEB_JWT_REFRESH_SECRET:-web-refresh-secret-kaamsaathi-prod-2026}
       - JWT_ACCESS_EXPIRES_IN=15m
       - JWT_REFRESH_EXPIRES_IN=7d
-      - CORS_ORIGIN=http://admin.smartdial.online
-    depends_on:
-      - mongodb
+      - CORS_ORIGIN=https://admin.smartdial.online
     networks:
       - kaamsaathi-net
 

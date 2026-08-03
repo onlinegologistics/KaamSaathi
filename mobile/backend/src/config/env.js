@@ -6,6 +6,22 @@ const toNumber = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+/**
+ * Express needs to know how many reverse proxies sit in front of it to recover
+ * the real client IP from X-Forwarded-For — get this wrong and every request
+ * looks like it came from the proxy, collapsing all rate limiting into one
+ * shared bucket. Deployments differ (Caddy alone, Caddy behind Cloudflare, ...),
+ * so this is tunable without a code change. Accepts a hop count, a boolean, or
+ * an Express trust-proxy string such as "loopback".
+ */
+const toTrustProxy = (value, fallback) => {
+  if (value === undefined || value === '') return fallback;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : value;
+};
+
 module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: toNumber(process.env.PORT, 5000),
@@ -18,6 +34,7 @@ module.exports = {
   otpMaxAttempts: toNumber(process.env.OTP_MAX_ATTEMPTS, 5),
   otpPepper: process.env.OTP_PEPPER || 'dev-otp-pepper-change-me',
   corsOrigin: process.env.CORS_ORIGIN || '*',
+  trustProxy: toTrustProxy(process.env.TRUST_PROXY, 1),
   rateLimitWindowMs: toNumber(process.env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
   rateLimitMax: toNumber(process.env.RATE_LIMIT_MAX, 100),
   otpRateLimitWindowMs: toNumber(process.env.OTP_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),

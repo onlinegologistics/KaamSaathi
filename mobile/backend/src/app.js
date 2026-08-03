@@ -18,7 +18,7 @@ const corsOptions =
         credentials: true,
       };
 
-app.set('trust proxy', 1);
+app.set('trust proxy', env.trustProxy);
 app.use(helmet());
 app.use(cors(corsOptions));
 app.use(compression());
@@ -30,8 +30,11 @@ if (env.nodeEnv !== 'test') {
   app.use(morgan('dev'));
 }
 
-app.get('/health', (_req, res) => {
-  res.json({ success: true, service: 'KaamSaathi Backend', status: 'ok' });
+// clientIp echoes back whatever Express resolved the caller to. If it shows a
+// loopback or proxy address instead of your real one, TRUST_PROXY is wrong and
+// every client is sharing a single rate-limit bucket.
+app.get('/health', (req, res) => {
+  res.json({ success: true, service: 'KaamSaathi Backend', status: 'ok', clientIp: req.ip });
 });
 
 app.use(routes);

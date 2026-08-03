@@ -73,3 +73,4 @@ jobs:
             docker compose pull
             docker compose up -d --remove-orphans
             docker image prune -f
+            docker exec giftme-caddy-1 caddy reload --config /etc/caddy/Caddyfile || true

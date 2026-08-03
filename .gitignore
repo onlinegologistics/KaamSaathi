@@ -38,6 +38,7 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# generated native folders
-/ios
-/android
+# generated native folders (expo prebuild output — recreate with `expo prebuild`)
+# Not anchored to the repo root: the app lives under mobile/frontend/ now.
+ios/
+android/

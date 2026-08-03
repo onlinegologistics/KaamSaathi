@@ -4,7 +4,7 @@ const API_PORT = 5000;
 
 // Last resort only: used for production builds, and for tunnels (which proxy
 // Metro but not this server). Keep it pointing at wherever the API really runs.
-const FALLBACK_API_BASE_URL = 'http://192.168.1.46:5000';
+const FALLBACK_API_BASE_URL = 'https://app.smartdial.online';
 
 // Hosts that serve the JS bundle but cannot reach the API server.
 const isTunnelHost = (host: string) =>

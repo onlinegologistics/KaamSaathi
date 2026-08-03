@@ -59,24 +59,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Copy deployment files to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          password: ${{ secrets.VPS_PASSWORD }}
-          port: ${{ secrets.VPS_PORT || '22' }}
-          target: "/var/www/kaamsaathi"
-          source: "docker-compose.yml,nginx/nginx.conf"
-
       - name: Execute Remote SSH Commands
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
           password: ${{ secrets.VPS_PASSWORD }}
+          key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || '22' }}
           script: |
             mkdir -p /var/www/kaamsaathi

@@ -25,6 +25,10 @@ services:
       - JWT_ACCESS_EXPIRES_IN=15m
       - JWT_REFRESH_EXPIRES_IN=7d
       - CORS_ORIGIN=*
+      # Server-side Places API key for location search. Injected by the deploy
+      # workflow into /var/www/kaamsaathi/.env from the GitHub secret of the
+      # same name — never committed to the repo.
+      - GOOGLE_MAPS_SERVER_API_KEY=${GOOGLE_MAPS_SERVER_API_KEY:-}
     networks:
       - kaamsaathi-net
 

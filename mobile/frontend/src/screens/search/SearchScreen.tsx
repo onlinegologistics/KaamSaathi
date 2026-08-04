@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TextInput, FlatList, StyleSheet, Pressable, ScrollView, Keyboard, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, FlatList, StyleSheet, Pressable, ScrollView, Keyboard, ActivityIndicator, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { theme } from '../../theme';
@@ -45,6 +45,7 @@ export const SearchScreen: React.FC<Props> = ({ navigation }) => {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [results, setResults] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const runSearch = useCallback(
     async (text: string, activeFilters: FilterState = filters, active: QuickFilter = quickFilter) => {
@@ -67,6 +68,7 @@ export const SearchScreen: React.FC<Props> = ({ navigation }) => {
         setResults([]);
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
     },
     [accessToken, filters, quickFilter]
@@ -76,6 +78,11 @@ export const SearchScreen: React.FC<Props> = ({ navigation }) => {
     runSearch(query, filters, quickFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, quickFilter]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    runSearch(query, filters, quickFilter);
+  }, [runSearch, query, filters, quickFilter]);
 
   return (
     <ScreenContainer style={styles.container}>
@@ -156,6 +163,7 @@ export const SearchScreen: React.FC<Props> = ({ navigation }) => {
         contentContainerStyle={styles.resultsList}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[theme.colors.primary]} />}
         ListEmptyComponent={
           loading ? (
             <View style={styles.empty}>

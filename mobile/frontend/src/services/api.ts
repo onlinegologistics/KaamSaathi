@@ -367,3 +367,30 @@ export const sendAiChatMessage = (accessToken: string, text: string) =>
     accessToken,
     body: { text },
   });
+
+// ---- Places (location search) ----
+
+export interface PlaceSuggestion {
+  placeId: string;
+  text: string;
+  mainText: string;
+  secondaryText: string;
+}
+
+export const placesAutocomplete = (
+  accessToken: string,
+  query: { input: string; lat?: number; lng?: number; sessionToken?: string }
+) =>
+  request<{ success: true; data: PlaceSuggestion[] }>('/places/autocomplete', {
+    accessToken,
+    query,
+  });
+
+export const getPlaceLocation = (accessToken: string, placeId: string, sessionToken?: string) =>
+  request<{ success: true; location: { latitude: number; longitude: number; address: string } }>(
+    `/places/${placeId}`,
+    {
+      accessToken,
+      query: sessionToken ? { sessionToken } : undefined,
+    }
+  );

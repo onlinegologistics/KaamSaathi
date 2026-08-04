@@ -22,8 +22,8 @@ export const AiAssistantScreen: React.FC<Props> = ({ navigation }) => {
   const [sending, setSending] = useState(false);
   const listRef = useRef<FlatList>(null);
 
-  // Hide the bottom tab bar while the assistant is open so it can't overlap the
-  // keyboard on Android (KeyboardAvoidingView's "padding" behavior is iOS-only here).
+  // Hide the bottom tab bar while the assistant is open so it can't sit between
+  // the input row and the keyboard.
   useLayoutEffect(() => {
     const tabNavigator = navigation.getParent();
     tabNavigator?.setOptions({ tabBarStyle: { display: 'none' } });
@@ -117,6 +117,7 @@ export const AiAssistantScreen: React.FC<Props> = ({ navigation }) => {
         ) : (
           <FlatList
             ref={listRef}
+            style={styles.messageList}
             data={messages}
             keyExtractor={(item) => item._id}
             renderItem={renderItem}
@@ -192,6 +193,9 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  messageList: {
+    flex: 1,
   },
   listContent: {
     paddingHorizontal: theme.spacing.md,

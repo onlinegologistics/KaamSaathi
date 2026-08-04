@@ -1,10 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, Platform, Pressable, GestureResponderEvent } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Modal, Platform, Pressable, ActivityIndicator, TextInput, Keyboard } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import * as Location from 'expo-location';
 import { theme } from '../theme';
 import { Button } from './Button';
 import { IconButton } from './IconButton';
 import { useApp } from '../context/AppContext';
+import { placesAutocomplete, getPlaceLocation, PlaceSuggestion } from '../services/api';
+
+const SUGGESTION_DEBOUNCE_MS = 350;
+const MIN_SUGGESTION_QUERY_LENGTH = 3;
+
+const newSessionToken = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 interface LocationValue {
   latitude: number;
@@ -20,9 +28,14 @@ interface LocationPickerModalProps {
 }
 
 const DEFAULT_CENTER = { latitude: 28.6139, longitude: 77.209 };
-// Roughly how many degrees the visible placeholder area spans, used only to
-// simulate a plausible lat/lng when the user taps — no real map tiles here.
-const DEGREES_SPAN = 0.05;
+const DEFAULT_DELTA = 0.01;
+
+const formatPlace = (place: Location.LocationGeocodedAddress): string => {
+  const locality = place.district || place.name || place.street;
+  const city = place.city || place.subregion || place.region;
+  const parts = [locality, city].filter((p): p is string => !!p && p.trim().length > 0);
+  return Array.from(new Set(parts)).join(', ');
+};
 
 export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   visible,
@@ -30,37 +43,150 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   onClose,
   onConfirm,
 }) => {
-  const { t } = useApp();
+  const { t, accessToken } = useApp();
+  const mapRef = useRef<MapView>(null);
   const [coord, setCoord] = useState<{ latitude: number; longitude: number }>(
     initialLocation ?? DEFAULT_CENTER
   );
-  const [pinOffset, setPinOffset] = useState({ x: 0, y: 0 });
-  const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
+  const [locating, setLocating] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(false);
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const sessionTokenRef = useRef(newSessionToken());
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (visible) {
       setCoord(initialLocation ?? DEFAULT_CENTER);
-      setPinOffset({ x: 0, y: 0 });
+      setSearchQuery('');
+      setSearchError(false);
+      setSuggestions([]);
+      sessionTokenRef.current = newSessionToken();
     }
   }, [visible, initialLocation]);
 
-  const handleTap = (e: GestureResponderEvent) => {
-    const { locationX, locationY } = e.nativeEvent;
-    const dxRatio = locationX / surfaceSize.width - 0.5;
-    const dyRatio = locationY / surfaceSize.height - 0.5;
-    setPinOffset({ x: locationX - surfaceSize.width / 2, y: locationY - surfaceSize.height / 2 });
-    setCoord({
-      latitude: DEFAULT_CENTER.latitude - dyRatio * DEGREES_SPAN,
-      longitude: DEFAULT_CENTER.longitude + dxRatio * DEGREES_SPAN,
-    });
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  const fetchSuggestions = async (query: string) => {
+    if (!accessToken) return;
+    setSuggestionsLoading(true);
+    try {
+      const res = await placesAutocomplete(accessToken, {
+        input: query,
+        lat: coord.latitude,
+        lng: coord.longitude,
+        sessionToken: sessionTokenRef.current,
+      });
+      setSuggestions(res.data);
+    } catch {
+      // Autocomplete is a nicety — the plain search-on-submit fallback still works
+      setSuggestions([]);
+    } finally {
+      setSuggestionsLoading(false);
+    }
   };
 
-  const handleConfirm = () => {
-    onConfirm({
-      latitude: coord.latitude,
-      longitude: coord.longitude,
-      label: `Pinned location (${coord.latitude.toFixed(3)}, ${coord.longitude.toFixed(3)})`,
-    });
+  const handleQueryChange = (value: string) => {
+    setSearchQuery(value);
+    if (searchError) setSearchError(false);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    const trimmed = value.trim();
+    if (trimmed.length < MIN_SUGGESTION_QUERY_LENGTH) {
+      setSuggestions([]);
+      return;
+    }
+    debounceRef.current = setTimeout(() => fetchSuggestions(trimmed), SUGGESTION_DEBOUNCE_MS);
+  };
+
+  const selectSuggestion = async (suggestion: PlaceSuggestion) => {
+    if (!accessToken) return;
+    Keyboard.dismiss();
+    setSuggestions([]);
+    setSearchQuery(suggestion.text);
+    setSearching(true);
+    setSearchError(false);
+    try {
+      const res = await getPlaceLocation(accessToken, suggestion.placeId, sessionTokenRef.current);
+      const next = { latitude: res.location.latitude, longitude: res.location.longitude };
+      setCoord(next);
+      mapRef.current?.animateToRegion({ ...next, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA }, 350);
+      // A new Places "session" starts after each Place Details call, per Google's session-token billing model.
+      sessionTokenRef.current = newSessionToken();
+    } catch {
+      setSearchError(true);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleSearch = async () => {
+    const query = searchQuery.trim();
+    if (!query || searching) return;
+    Keyboard.dismiss();
+    setSuggestions([]);
+    setSearching(true);
+    setSearchError(false);
+    try {
+      const results = await Location.geocodeAsync(query);
+      if (!results[0]) {
+        setSearchError(true);
+        return;
+      }
+      const next = { latitude: results[0].latitude, longitude: results[0].longitude };
+      setCoord(next);
+      mapRef.current?.animateToRegion({ ...next, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA }, 350);
+    } catch {
+      setSearchError(true);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const initialRegion: Region = {
+    latitude: coord.latitude,
+    longitude: coord.longitude,
+    latitudeDelta: DEFAULT_DELTA,
+    longitudeDelta: DEFAULT_DELTA,
+  };
+
+  const useMyLocation = async () => {
+    setLocating(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) return;
+      const pos = await Location.getCurrentPositionAsync({});
+      const next = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+      setCoord(next);
+      mapRef.current?.animateToRegion({ ...next, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA }, 350);
+    } catch {
+      // GPS unavailable — user can still drop a pin manually
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    setConfirming(true);
+    let label = `Pinned location (${coord.latitude.toFixed(3)}, ${coord.longitude.toFixed(3)})`;
+    try {
+      const places = await Location.reverseGeocodeAsync(coord);
+      if (places[0]) {
+        const formatted = formatPlace(places[0]);
+        if (formatted) label = formatted;
+      }
+    } catch {
+      // reverse geocode best-effort only — fall back to raw coordinates
+    }
+    setConfirming(false);
+    onConfirm({ latitude: coord.latitude, longitude: coord.longitude, label });
   };
 
   return (
@@ -72,44 +198,93 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
           <View style={{ width: theme.MIN_TAP_TARGET }} />
         </View>
 
-        <Pressable
-          style={styles.mapWrap}
-          onPress={handleTap}
-          onLayout={(e) => setSurfaceSize(e.nativeEvent.layout)}
-        >
-          <View style={styles.gridBackground}>
-            {Array.from({ length: 6 }).map((_, i) => (
-              <View key={`h${i}`} style={[styles.gridLine, styles.gridLineH, { top: `${(i + 1) * 14}%` }]} />
-            ))}
-            {Array.from({ length: 6 }).map((_, i) => (
-              <View key={`v${i}`} style={[styles.gridLine, styles.gridLineV, { left: `${(i + 1) * 14}%` }]} />
-            ))}
-          </View>
-
-          <View
-            pointerEvents="none"
-            style={[
-              styles.pin,
-              { transform: [{ translateX: pinOffset.x }, { translateY: pinOffset.y - 20 }] },
-            ]}
+        <View style={styles.mapWrap}>
+          <MapView
+            ref={mapRef}
+            style={styles.map}
+            provider={PROVIDER_GOOGLE}
+            initialRegion={initialRegion}
+            onPress={(e) => setCoord(e.nativeEvent.coordinate)}
           >
-            <MaterialCommunityIcons name="map-marker" size={44} color={theme.colors.primary} />
+            <Marker
+              coordinate={coord}
+              draggable
+              onDragEnd={(e) => setCoord(e.nativeEvent.coordinate)}
+            />
+          </MapView>
+
+          <View style={styles.searchWrap}>
+            <View style={styles.searchBar}>
+              <MaterialCommunityIcons name="magnify" size={20} color={theme.colors.textMuted} />
+              <TextInput
+                value={searchQuery}
+                onChangeText={handleQueryChange}
+                onSubmitEditing={handleSearch}
+                returnKeyType="search"
+                placeholder="Search for an area or address"
+                placeholderTextColor={theme.colors.textMuted}
+                style={styles.searchInput}
+              />
+              {searching || suggestionsLoading ? (
+                <ActivityIndicator size="small" color={theme.colors.primary} />
+              ) : searchQuery.trim().length > 0 ? (
+                <Pressable accessibilityRole="button" accessibilityLabel="Search" onPress={handleSearch} hitSlop={8}>
+                  <MaterialCommunityIcons name="arrow-right-circle" size={22} color={theme.colors.primary} />
+                </Pressable>
+              ) : null}
+            </View>
+
+            {suggestions.length > 0 ? (
+              <View style={styles.suggestionsPanel}>
+                {suggestions.map((item) => (
+                  <Pressable
+                    key={item.placeId}
+                    accessibilityRole="button"
+                    onPress={() => selectSuggestion(item)}
+                    style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]}
+                  >
+                    <MaterialCommunityIcons name="map-marker-outline" size={18} color={theme.colors.textMuted} />
+                    <View style={styles.suggestionTextWrap}>
+                      <Text style={styles.suggestionMainText} numberOfLines={1}>
+                        {item.mainText || item.text}
+                      </Text>
+                      {item.secondaryText ? (
+                        <Text style={styles.suggestionSecondaryText} numberOfLines={1}>
+                          {item.secondaryText}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            ) : searchError ? (
+              <Text style={styles.searchErrorText}>No matching place found — try a different search.</Text>
+            ) : null}
           </View>
 
-          <View pointerEvents="none" style={styles.centerHint}>
-            <Text style={styles.centerHintText}>{t('dropPinOnMap')}: Tap anywhere to place pin</Text>
-          </View>
-        </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('useCurrentLocation')}
+            onPress={useMyLocation}
+            style={styles.locateBtn}
+          >
+            {locating ? (
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+            ) : (
+              <MaterialCommunityIcons name="crosshairs-gps" size={22} color={theme.colors.primary} />
+            )}
+          </Pressable>
+        </View>
 
         <View style={styles.coordRow}>
-          <MaterialCommunityIcons name="crosshairs-gps" size={18} color={theme.colors.textSecondary} />
+          <MaterialCommunityIcons name="map-marker" size={18} color={theme.colors.textSecondary} />
           <Text style={styles.coordText}>
             {coord.latitude.toFixed(4)}, {coord.longitude.toFixed(4)}
           </Text>
         </View>
 
         <View style={styles.footer}>
-          <Button label={t('done')} onPress={handleConfirm} fullWidth />
+          <Button label={t('done')} onPress={handleConfirm} loading={confirming} fullWidth />
         </View>
       </View>
     </Modal>
@@ -135,50 +310,95 @@ const styles = StyleSheet.create({
   },
   mapWrap: {
     flex: 1,
-    backgroundColor: theme.colors.secondaryLight,
-    overflow: 'hidden',
   },
-  gridBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  map: {
+    flex: 1,
   },
-  gridLine: {
-    position: 'absolute',
-    backgroundColor: theme.colors.secondary,
-    opacity: 0.15,
-  },
-  gridLineH: {
-    left: 0,
-    right: 0,
-    height: 1,
-  },
-  gridLineV: {
-    top: 0,
-    bottom: 0,
-    width: 1,
-  },
-  pin: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    marginLeft: -22,
-    marginTop: -44,
-  },
-  centerHint: {
+  searchWrap: {
     position: 'absolute',
     top: theme.spacing.md,
-    alignSelf: 'center',
-    backgroundColor: theme.colors.overlay,
+    left: theme.spacing.md,
+    right: theme.spacing.md,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.pill,
     paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.xs,
+    minHeight: 48,
+    shadowColor: theme.colors.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  centerHintText: {
+  searchInput: {
+    flex: 1,
+    ...theme.typography.body,
+    color: theme.colors.text,
+  },
+  searchErrorText: {
     ...theme.typography.caption,
-    color: theme.colors.textInverse,
+    color: theme.colors.danger,
+    backgroundColor: theme.colors.surface,
+    alignSelf: 'flex-start',
+    marginTop: theme.spacing.xs,
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 4,
+  },
+  suggestionsPanel: {
+    marginTop: theme.spacing.xs,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
+    overflow: 'hidden',
+    shadowColor: theme.colors.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.divider,
+  },
+  suggestionRowPressed: {
+    backgroundColor: theme.colors.surfaceAlt,
+  },
+  suggestionTextWrap: {
+    flex: 1,
+  },
+  suggestionMainText: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+  },
+  suggestionSecondaryText: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+    marginTop: 1,
+  },
+  locateBtn: {
+    position: 'absolute',
+    right: theme.spacing.md,
+    bottom: theme.spacing.md,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: theme.colors.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 3,
   },
   coordRow: {
     flexDirection: 'row',

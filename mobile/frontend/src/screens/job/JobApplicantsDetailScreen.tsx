@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Alert, TextInput } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Alert, TextInput, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { theme } from '../../theme';
@@ -27,6 +27,7 @@ export const JobApplicantsDetailScreen: React.FC<Props> = ({ route, navigation }
   const { accessToken } = useApp();
   const [job, setJob] = useState<BackendJob | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [actioningUserId, setActioningUserId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [otpDraft, setOtpDraft] = useState('');
@@ -36,10 +37,18 @@ export const JobApplicantsDetailScreen: React.FC<Props> = ({ route, navigation }
     getJob(accessToken, jobId)
       .then((res) => setJob(res.job))
       .catch(() => setJob(null))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        setRefreshing(false);
+      });
   }, [accessToken, jobId]);
 
   useEffect(() => {
+    fetchJob();
+  }, [fetchJob]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
     fetchJob();
   }, [fetchJob]);
 
@@ -161,6 +170,7 @@ export const JobApplicantsDetailScreen: React.FC<Props> = ({ route, navigation }
         data={job.applicants}
         keyExtractor={(item) => item.userId._id}
         contentContainerStyle={styles.listContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[theme.colors.primary]} />}
         renderItem={({ item }) => (
           <ApplicantRow
             applicant={item}

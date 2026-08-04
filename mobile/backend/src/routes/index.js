@@ -6,6 +6,7 @@ const chatRoutes = require('./chatRoutes');
 const aiChatRoutes = require('./aiChatRoutes');
 const adminRoutes = require('./adminRoutes');
 const settingRoutes = require('./settingRoutes');
+const placesRoutes = require('./placesRoutes');
 
 const router = express.Router();
 
@@ -16,5 +17,6 @@ router.use('/chats', chatRoutes);
 router.use('/ai-chat', aiChatRoutes);
 router.use('/admin', adminRoutes);
 router.use('/settings', settingRoutes);
+router.use('/places', placesRoutes);
 
 module.exports = router;

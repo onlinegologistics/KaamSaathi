@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, Alert, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -41,6 +41,7 @@ export const JobApplicantsScreen: React.FC<Props> = ({ navigation }) => {
   const [myJobs, setMyJobs] = useState<BackendJob[]>([]);
   const [appliedJobs, setAppliedJobs] = useState<BackendJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchAll = useCallback(() => {
@@ -52,7 +53,10 @@ export const JobApplicantsScreen: React.FC<Props> = ({ navigation }) => {
       listJobs(accessToken, { applied: true, limit: 50 })
         .then((res) => setAppliedJobs(res.data))
         .catch(() => setAppliedJobs([])),
-    ]).finally(() => setLoading(false));
+    ]).finally(() => {
+      setLoading(false);
+      setRefreshing(false);
+    });
   }, [accessToken]);
 
   useFocusEffect(
@@ -60,6 +64,11 @@ export const JobApplicantsScreen: React.FC<Props> = ({ navigation }) => {
       fetchAll();
     }, [fetchAll])
   );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchAll();
+  }, [fetchAll]);
 
   const visible = useMemo(() => {
     if (tab === 'applied') return appliedJobs;
@@ -139,6 +148,7 @@ export const JobApplicantsScreen: React.FC<Props> = ({ navigation }) => {
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[theme.colors.primary]} />}
           renderItem={({ item }) => (
             <JobPostCard
               job={item}

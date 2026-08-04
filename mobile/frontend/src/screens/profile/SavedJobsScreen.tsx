@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -19,10 +19,10 @@ export const SavedJobsScreen: React.FC<Props> = ({ navigation }) => {
   const { t, accessToken, bookmarkedJobIds, applyToJob } = useApp();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchSavedJobs = useCallback(() => {
     if (!accessToken) return;
-    setLoading(true);
     listJobs(accessToken, { limit: 100 })
       .then((res) => {
         const saved = res.data
@@ -31,14 +31,23 @@ export const SavedJobsScreen: React.FC<Props> = ({ navigation }) => {
         setJobs(saved);
       })
       .catch(() => setJobs([]))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        setRefreshing(false);
+      });
   }, [accessToken, bookmarkedJobIds]);
 
   useFocusEffect(
     useCallback(() => {
+      setLoading(true);
       fetchSavedJobs();
     }, [fetchSavedJobs])
   );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchSavedJobs();
+  }, [fetchSavedJobs]);
 
   return (
     <ScreenContainer>
@@ -56,6 +65,7 @@ export const SavedJobsScreen: React.FC<Props> = ({ navigation }) => {
           data={jobs}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[theme.colors.primary]} />}
           renderItem={({ item }) => (
             <JobCard
               job={item}

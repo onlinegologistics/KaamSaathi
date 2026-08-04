@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, Image, FlatList, StyleSheet, ActivityIndicator, RefreshControl, Modal, Pressable } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -68,6 +68,7 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
   const [category, setCategory] = useState<JobCategory | 'all'>('all');
   const [page, setPage] = useState(1);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [popularJobs, setPopularJobs] = useState<Job[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -137,6 +138,42 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, category, userLocation]);
 
+  // Independent of the category filter above — this is what "Popular Services"
+  // ranks by, so switching a filter on the main feed can't collapse it to one category.
+  const fetchPopularJobs = useCallback(async () => {
+    if (!accessToken) return;
+    try {
+      const res = await listJobs(accessToken, { status: 'open', page: 1, limit: 50 });
+      setPopularJobs(res.data.map((job) => toJobViewModel(job, userLocation)));
+    } catch {
+      // best-effort — Popular Services just keeps showing the last good data
+    }
+  }, [accessToken, userLocation]);
+
+  useEffect(() => {
+    fetchPopularJobs();
+  }, [fetchPopularJobs]);
+
+  // Ranks each category by how many open jobs it has right now, so this
+  // reflects real demand instead of repeating whatever the main feed shows.
+  const popularServices = useMemo(() => {
+    const stats = new Map<string, { count: number; minPay: number }>();
+    popularJobs.forEach((job) => {
+      const existing = stats.get(job.category);
+      if (existing) {
+        existing.count += 1;
+        existing.minPay = Math.min(existing.minPay, job.pay);
+      } else {
+        stats.set(job.category, { count: 1, minPay: job.pay });
+      }
+    });
+    return categories
+      .map((cat) => ({ ...cat, ...stats.get(cat.key) }))
+      .filter((cat): cat is typeof cat & { count: number; minPay: number } => !!cat.count)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+  }, [popularJobs]);
+
   const handleLoadMore = useCallback(() => {
     if (hasMore && !loading) fetchJobs(page + 1);
   }, [hasMore, loading, page, fetchJobs]);
@@ -144,7 +181,8 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     fetchJobs(1);
-  }, [fetchJobs]);
+    fetchPopularJobs();
+  }, [fetchJobs, fetchPopularJobs]);
 
   const renderItem = useCallback(
     ({ item }: { item: Job }) => (
@@ -316,15 +354,20 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
               </Pressable>
             </View>
 
-            {jobs.length > 0 ? (
+            {popularServices.length > 0 ? (
               <FlatList
                 horizontal
-                data={jobs.slice(0, 8)}
-                keyExtractor={(item) => `service-${item.id}`}
+                data={popularServices}
+                keyExtractor={(item) => `service-${item.key}`}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.serviceRow}
                 renderItem={({ item }) => (
-                  <ServiceCard job={item} onPress={() => navigation.navigate('JobDetail', { jobId: item.id })} />
+                  <ServiceCard
+                    meta={item}
+                    count={item.count}
+                    minPay={item.minPay}
+                    onPress={() => setCategory((prev) => (prev === item.key ? 'all' : item.key))}
+                  />
                 )}
               />
             ) : null}
@@ -454,12 +497,17 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const ServiceCard: React.FC<{ job: Job; onPress: () => void }> = ({ job, onPress }) => {
-  const meta = categories.find((c) => c.key === job.category) ?? categories[0];
+const ServiceCard: React.FC<{ meta: (typeof categories)[number]; count: number; minPay: number; onPress: () => void }> = ({
+  meta,
+  count,
+  minPay,
+  onPress,
+}) => {
+  const { t } = useApp();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={job.title}
+      accessibilityLabel={t(meta.labelKey)}
       onPress={onPress}
       style={({ pressed }) => [styles.serviceCard, pressed && styles.pressed]}
     >
@@ -471,9 +519,9 @@ const ServiceCard: React.FC<{ job: Job; onPress: () => void }> = ({ job, onPress
         />
       </View>
       <Text style={styles.serviceTitle} numberOfLines={1}>
-        {job.title}
+        {t(meta.labelKey)}
       </Text>
-      <Text style={styles.servicePrice}>{`From ₹${job.pay}`}</Text>
+      <Text style={styles.servicePrice} numberOfLines={1}>{`${count} job${count === 1 ? '' : 's'} • From ₹${minPay}`}</Text>
     </Pressable>
   );
 };

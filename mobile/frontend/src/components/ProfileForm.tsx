@@ -1,8 +1,9 @@
 import React, { useCallback, useImperativeHandle, useState } from 'react';
-import { View, Text, StyleSheet, Image, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, Image, Pressable, Alert, Platform } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { theme } from '../theme';
 import { Button } from './Button';
 import { Input } from './Input';
@@ -10,34 +11,29 @@ import { LocationPickerModal } from './LocationPickerModal';
 import { useApp } from '../context/AppContext';
 import { User } from '../types';
 
-const DOB_PATTERN = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+const MAX_DOB_AGE_YEARS = 100;
 
-const formatDobInput = (value: string): string => {
-  const digits = value.replace(/\D/g, '').slice(0, 8);
-  const parts = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)].filter(Boolean);
-  return parts.join('/');
+// Calendar values land on local midnight for the picked day; normalizing to UTC
+// midnight keeps the stored date from shifting a day when serialized/parsed
+// across timezones (mirrors how the backend stores dateOfBirth).
+const toUtcMidnight = (date: Date) => new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+
+const getDefaultDobDate = () => {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() - 25);
+  return toUtcMidnight(d);
 };
 
-const parseDob = (value: string): string | null => {
-  const match = value.match(DOB_PATTERN);
-  if (!match) return null;
-  const [, dd, mm, yyyy] = match;
-  const day = Number(dd);
-  const month = Number(mm);
-  const year = Number(yyyy);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  const isValidCalendarDate =
-    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-  if (!isValidCalendarDate || date.getTime() > Date.now()) return null;
-  return date.toISOString();
+const getMinDobDate = () => {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() - MAX_DOB_AGE_YEARS);
+  return toUtcMidnight(d);
 };
 
-const toDobDisplay = (iso?: string) => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-  return `${dd}/${mm}/${d.getUTCFullYear()}`;
+const formatDobDisplay = (date: Date) => {
+  const dd = String(date.getUTCDate()).padStart(2, '0');
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${date.getUTCFullYear()}`;
 };
 
 export interface ProfileFormValues {
@@ -75,7 +71,10 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
   const [phoneDigits, setPhoneDigits] = useState(initialUser?.phone?.replace(/^\+91/, '').replace(/\D/g, '').slice(0, 10) ?? '');
   const [photoUri, setPhotoUri] = useState<string | null>(initialUser?.avatar ?? null);
   const [email, setEmail] = useState(initialUser?.email ?? '');
-  const [dob, setDob] = useState(toDobDisplay(initialUser?.dateOfBirth));
+  const [dobDate, setDobDate] = useState<Date | null>(
+    initialUser?.dateOfBirth ? toUtcMidnight(new Date(initialUser.dateOfBirth)) : null
+  );
+  const [dobPickerVisible, setDobPickerVisible] = useState(false);
   const [education, setEducation] = useState(initialUser?.education ?? '');
   const [currentAddress, setCurrentAddress] = useState(initialUser?.currentAddress ?? '');
   const [location, setLocation] = useState<{ latitude: number; longitude: number; label: string } | null>(
@@ -85,15 +84,33 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState('');
 
-  const dobIso = dob.trim() ? parseDob(dob.trim()) : null;
-  const dobHasError = dob.trim().length > 0 && !dobIso;
+  const dobIso = dobDate ? dobDate.toISOString() : null;
   const phoneHasError = !!requirePhone && phoneDigits.length > 0 && phoneDigits.length !== 10;
 
   const canSubmit =
     name.trim().length > 0 &&
-    !dobHasError &&
     (!requirePhone || phoneDigits.length === 10) &&
     (!!location || (!!initialUser && !requirePhone));
+
+  const openDobPicker = () => {
+    const initial = dobDate ?? getDefaultDobDate();
+    const maximumDate = new Date();
+    const minimumDate = getMinDobDate();
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: initial,
+        mode: 'date',
+        maximumDate,
+        minimumDate,
+        onChange: (event, date) => {
+          if (event.type === 'dismissed' || !date) return;
+          setDobDate(toUtcMidnight(date));
+        },
+      });
+      return;
+    }
+    setDobPickerVisible(true);
+  };
 
   const pickPhoto = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -208,16 +225,28 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
         />
       ) : null}
 
-      <Input
-        label={t('yourDob')}
-        placeholder={t('dobPlaceholder')}
-        value={dob}
-        onChangeText={(value) => setDob(formatDobInput(value))}
-        keyboardType="number-pad"
-        maxLength={10}
-        icon="cake-variant-outline"
-        error={dobHasError ? t('dobInvalid') : undefined}
-      />
+      <View style={styles.dobWrapper}>
+        <Text style={styles.dobLabel}>{t('yourDob')}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('yourDob')} onPress={openDobPicker} style={styles.dobBox}>
+          <MaterialCommunityIcons name="cake-variant-outline" size={20} color={theme.colors.textMuted} style={styles.dobIcon} />
+          <Text style={dobDate ? styles.dobText : styles.dobPlaceholderText}>
+            {dobDate ? formatDobDisplay(dobDate) : t('dobPlaceholder')}
+          </Text>
+          <MaterialCommunityIcons name="calendar-month-outline" size={20} color={theme.colors.textMuted} />
+        </Pressable>
+      </View>
+      {Platform.OS !== 'android' && dobPickerVisible && (
+        <DateTimePicker
+          value={dobDate ?? getDefaultDobDate()}
+          mode="date"
+          maximumDate={new Date()}
+          minimumDate={getMinDobDate()}
+          onValueChange={(_event, date) => {
+            if (date) setDobDate(toUtcMidnight(date));
+          }}
+          onDismiss={() => setDobPickerVisible(false)}
+        />
+      )}
 
       <Input
         label={t('yourEducation')}
@@ -336,6 +365,38 @@ const styles = StyleSheet.create({
     ...theme.typography.bodyBold,
     color: theme.colors.text,
     marginBottom: theme.spacing.sm,
+  },
+  dobWrapper: {
+    alignSelf: 'stretch',
+    marginBottom: theme.spacing.md,
+  },
+  dobLabel: {
+    ...theme.typography.bodyBold,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.xs,
+  },
+  dobBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 52,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.md,
+    paddingHorizontal: theme.spacing.md,
+    backgroundColor: theme.colors.surface,
+  },
+  dobIcon: {
+    marginRight: theme.spacing.xs,
+  },
+  dobText: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+    flex: 1,
+  },
+  dobPlaceholderText: {
+    ...theme.typography.body,
+    color: theme.colors.textMuted,
+    flex: 1,
   },
   locationChip: {
     flexDirection: 'row',

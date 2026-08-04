@@ -31,8 +31,8 @@ export const ChatThreadScreen: React.FC<Props> = ({ route, navigation }) => {
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList>(null);
 
-  // Hide the bottom tab bar while the thread is open so it can't overlap the
-  // keyboard on Android (KeyboardAvoidingView's "padding" behavior is iOS-only here).
+  // Hide the bottom tab bar while the thread is open so it can't sit between
+  // the input row and the keyboard.
   useLayoutEffect(() => {
     const tabNavigator = navigation.getParent();
     tabNavigator?.setOptions({ tabBarStyle: { display: 'none' } });
@@ -109,6 +109,7 @@ export const ChatThreadScreen: React.FC<Props> = ({ route, navigation }) => {
       >
         <FlatList
           ref={listRef}
+          style={styles.messageList}
           data={messages}
           keyExtractor={(item) => item._id}
           renderItem={renderItem}
@@ -154,10 +155,15 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
     flex: 1,
   },
+  messageList: {
+    flex: 1,
+  },
   listContent: {
     paddingHorizontal: theme.spacing.md,
     paddingVertical: theme.spacing.md,
     gap: theme.spacing.sm,
+    flexGrow: 1,
+    justifyContent: 'flex-end',
   },
   bubbleRow: {
     flexDirection: 'row',

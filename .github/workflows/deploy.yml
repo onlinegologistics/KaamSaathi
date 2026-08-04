@@ -59,17 +59,40 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Execute Remote SSH Commands
-        uses: appleboy/ssh-action@v1.0.3
+      # Keeps the VPS stack definition in sync with the repo, so adding a service
+      # or an environment variable here is all it takes to ship it.
+      - name: Copy Compose Files to VPS
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || '22' }}
+          source: "docker-compose.yml,nginx/nginx.conf"
+          target: /var/www/kaamsaathi
+          overwrite: true
+
+      - name: Execute Remote SSH Commands
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GOOGLE_MAPS_SERVER_API_KEY: ${{ secrets.GOOGLE_MAPS_SERVER_API_KEY }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || '22' }}
+          envs: GOOGLE_MAPS_SERVER_API_KEY
           script: |
             mkdir -p /var/www/kaamsaathi
             cd /var/www/kaamsaathi
+            # Refresh just this key so any other vars already in .env survive.
+            touch .env
+            grep -v '^GOOGLE_MAPS_SERVER_API_KEY=' .env > .env.tmp || true
+            echo "GOOGLE_MAPS_SERVER_API_KEY=$GOOGLE_MAPS_SERVER_API_KEY" >> .env.tmp
+            mv .env.tmp .env
+            chmod 600 .env
             docker compose pull
             docker compose up -d --remove-orphans
             docker image prune -f

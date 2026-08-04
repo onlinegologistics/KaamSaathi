@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, Alert, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -19,6 +19,7 @@ export const MyApplicationsScreen: React.FC<Props> = ({ navigation }) => {
   const { accessToken, currentUser, applyToJob, cancelAcceptedJob } = useApp();
   const [jobs, setJobs] = useState<BackendJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
 
   const fetchApplications = useCallback(() => {
@@ -26,7 +27,10 @@ export const MyApplicationsScreen: React.FC<Props> = ({ navigation }) => {
     listJobs(accessToken, { applied: true, limit: 50 })
       .then((res) => setJobs(res.data))
       .catch(() => setJobs([]))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        setRefreshing(false);
+      });
   }, [accessToken]);
 
   useFocusEffect(
@@ -34,6 +38,11 @@ export const MyApplicationsScreen: React.FC<Props> = ({ navigation }) => {
       fetchApplications();
     }, [fetchApplications])
   );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchApplications();
+  }, [fetchApplications]);
 
   const openAcceptedChat = async (job: BackendJob) => {
     if (!accessToken) return;
@@ -94,6 +103,7 @@ export const MyApplicationsScreen: React.FC<Props> = ({ navigation }) => {
           data={jobs}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.listContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[theme.colors.primary]} />}
           renderItem={({ item }) => {
             const myApplication = item.applicants.find((a) => a.userId._id === currentUser?.id);
             if (myApplication?.status === 'accepted') {

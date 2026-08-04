@@ -4,6 +4,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { CompositeNavigationProp } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { theme } from '../../theme';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { Button } from '../../components/Button';
@@ -12,9 +14,16 @@ import { getJob, getJobChat, BackendJob } from '../../services/api';
 import { formatDurationHours } from '../../utils/jobAdapter';
 import { timeAgo } from '../../utils/time';
 import { useApp } from '../../context/AppContext';
-import { HomeStackParamList, SearchStackParamList } from '../../navigation/types';
+import { HomeStackParamList, SearchStackParamList, MainTabParamList } from '../../navigation/types';
 
-type Props = NativeStackScreenProps<HomeStackParamList | SearchStackParamList, 'JobDetail'>;
+type JobDetailNavigation = CompositeNavigationProp<
+  NativeStackScreenProps<HomeStackParamList | SearchStackParamList, 'JobDetail'>['navigation'],
+  BottomTabNavigationProp<MainTabParamList>
+>;
+
+type Props = Omit<NativeStackScreenProps<HomeStackParamList | SearchStackParamList, 'JobDetail'>, 'navigation'> & {
+  navigation: JobDetailNavigation;
+};
 
 export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { jobId } = route.params;
@@ -172,7 +181,7 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           <View style={[styles.categoryBadge, { backgroundColor: category.color }]}>
             <MaterialCommunityIcons
               name={category.icon as keyof typeof MaterialCommunityIcons.glyphMap}
-              size={28}
+              size={22}
               color={theme.colors.textInverse}
             />
           </View>
@@ -235,7 +244,14 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, theme.spacing.md) }]}>
-        {isPoster ? null : myApplication?.status === 'accepted' ? (
+        {isPoster ? (
+          <Button
+            label="Manage Applicants"
+            onPress={() => navigation.navigate('ProfileTab', { screen: 'JobApplicantsDetail', params: { jobId: job._id } })}
+            fullWidth
+            icon={<MaterialCommunityIcons name="account-group-outline" size={20} color={theme.colors.textInverse} />}
+          />
+        ) : myApplication?.status === 'accepted' ? (
           <View style={styles.acceptedFooterActions}>
             <Button
               label="Message Poster"
@@ -331,13 +347,13 @@ const styles = StyleSheet.create({
     minHeight: 400,
   },
   categoryBadge: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -31,
-    borderWidth: 4,
+    marginTop: -24,
+    borderWidth: 3,
     borderColor: theme.colors.surface,
   },
   title: {

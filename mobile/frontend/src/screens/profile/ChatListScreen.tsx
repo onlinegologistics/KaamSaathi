@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -32,10 +32,13 @@ export const ChatListScreen: React.FC<Props> = ({ navigation }) => {
   const { t, accessToken } = useApp();
   const [threads, setThreads] = useState<BackendChat[]>([]);
   const [tab, setTab] = useState<ChatTab>('chats');
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchThreads = useCallback(() => {
-    if (!accessToken) return;
-    listThreads(accessToken).then((res) => setThreads(res.data)).catch(() => {});
+    if (!accessToken) return Promise.resolve();
+    return listThreads(accessToken)
+      .then((res) => setThreads(res.data))
+      .catch(() => {});
   }, [accessToken]);
 
   useFocusEffect(
@@ -43,6 +46,11 @@ export const ChatListScreen: React.FC<Props> = ({ navigation }) => {
       fetchThreads();
     }, [fetchThreads])
   );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchThreads().finally(() => setRefreshing(false));
+  }, [fetchThreads]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -126,6 +134,7 @@ export const ChatListScreen: React.FC<Props> = ({ navigation }) => {
         keyExtractor={(item) => item._id}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[theme.colors.primary]} />}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListEmptyComponent={
           <View style={styles.empty}>

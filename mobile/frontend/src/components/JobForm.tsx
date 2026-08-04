@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Alert, Platform } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import * as Location from 'expo-location';
 import { theme } from '../theme';
 import { Button } from './Button';
 import { Input } from './Input';
@@ -35,11 +36,12 @@ interface JobFormProps {
   onSubmit: (payload: CreateJobPayload) => Promise<void>;
 }
 
-const toInitialLocation = (job?: BackendJob) => {
-  if (!job) return { latitude: 28.7041, longitude: 77.1025, label: 'Pitampura, Delhi' };
+const toInitialLocation = (job: BackendJob) => {
   const [lng, lat] = job.location.coordinates;
   return { latitude: lat, longitude: lng, label: job.location.address };
 };
+
+type LocationValue = { latitude: number; longitude: number; label: string };
 
 export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submitting, onSubmit }) => {
   const { t } = useApp();
@@ -49,8 +51,44 @@ export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submi
   const [duration, setDuration] = useState(initialJob?.duration ?? MIN_DURATION_HOURS);
   const [pay, setPay] = useState(initialJob ? String(initialJob.payAmount) : '');
   const [people, setPeople] = useState(initialJob?.peopleNeeded ?? MIN_PEOPLE);
-  const [location, setLocation] = useState(toInitialLocation(initialJob));
+  const [location, setLocation] = useState<LocationValue | null>(initialJob ? toInitialLocation(initialJob) : null);
+  const [locating, setLocating] = useState(!initialJob);
   const [mapVisible, setMapVisible] = useState(false);
+
+  // New posts default to the poster's own GPS location instead of a fixed
+  // placeholder — a manual pin drop (via "Change") always wins over this.
+  useEffect(() => {
+    if (initialJob) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (!permission.granted || cancelled) return;
+        const pos = await Location.getCurrentPositionAsync({});
+        if (cancelled) return;
+        let label = 'Current Location';
+        try {
+          const places = await Location.reverseGeocodeAsync({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+          });
+          if (places[0]) {
+            label = [places[0].district, places[0].city].filter(Boolean).join(', ') || label;
+          }
+        } catch {
+          // reverse geocode best-effort only
+        }
+        if (!cancelled) setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, label });
+      } catch {
+        // GPS unavailable — user can still drop a pin manually
+      } finally {
+        if (!cancelled) setLocating(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialJob]);
   const [scheduledFor, setScheduledFor] = useState<Date | null>(
     initialJob ? new Date(initialJob.scheduledFor) : null
   );
@@ -104,7 +142,7 @@ export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submi
   };
 
   const handleSubmit = async () => {
-    if (!canSubmit || !scheduledFor || !category) {
+    if (!canSubmit || !scheduledFor || !category || !location) {
       const missing = getMissingFieldMessage();
       if (missing) Alert.alert('Missing information', `Please fill in: ${missing}`);
       return;
@@ -202,9 +240,11 @@ export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submi
 
       <Text style={styles.sectionLabel}>{t('pickLocation')}</Text>
       <View style={styles.locationLine}>
-        <Text style={styles.locationText}>{location.label}</Text>
+        <Text style={location ? styles.locationText : styles.selectPlaceholder}>
+          {locating ? 'Detecting your location…' : (location?.label ?? t('pickLocation'))}
+        </Text>
         <Pressable onPress={() => setMapVisible(true)} hitSlop={8}>
-          <Text style={styles.changeText}>{t('change')}</Text>
+          <Text style={styles.changeText}>{location ? t('change') : t('dropPinOnMap')}</Text>
         </Pressable>
       </View>
 

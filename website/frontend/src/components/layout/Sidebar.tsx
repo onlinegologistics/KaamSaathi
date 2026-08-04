@@ -106,7 +106,7 @@ export const Sidebar = () => {
           KS
         </div>
         <div className="ml-3 min-w-0">
-          <p className="truncate text-lg font-bold leading-5 tracking-tight">KaamSaathi</p>
+          <p className="truncate text-lg font-bold leading-5 tracking-tight">AnyWork</p>
           <p className="mt-1 text-xs font-medium text-muted-foreground">Admin Control Center</p>
         </div>
       </div>

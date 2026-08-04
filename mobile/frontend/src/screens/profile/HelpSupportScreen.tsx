@@ -40,14 +40,14 @@ export const HelpSupportScreen: React.FC<Props> = ({ navigation }) => {
           <HelpAction
             icon="email-outline"
             label="Email Support"
-            body="support@kaamsaathi.app"
-            onPress={() => Linking.openURL('mailto:support@kaamsaathi.app').catch(() => {})}
+            body="support@anywork.app"
+            onPress={() => Linking.openURL('mailto:support@anywork.app').catch(() => {})}
           />
           <HelpAction
             icon="frequently-asked-questions"
             label="FAQs"
             body="Common questions and answers"
-            onPress={() => Linking.openURL('https://kaamsaathi.app/help').catch(() => {})}
+            onPress={() => Linking.openURL('https://anywork.app/help').catch(() => {})}
           />
         </View>
       </ScrollView>

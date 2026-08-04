@@ -24,7 +24,7 @@ type OnboardingPage = {
 
 const defaultPages: OnboardingPage[] = [
   {
-    title: 'KaamSaathi',
+    title: 'AnyWork',
     subtitle: 'Find work. Find workers. Instantly.',
     icon: 'handshake',
     tint: 'orange',

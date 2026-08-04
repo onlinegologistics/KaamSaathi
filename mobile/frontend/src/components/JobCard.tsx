@@ -31,7 +31,7 @@ export const JobCard: React.FC<JobCardProps> = ({ job, onPress, onApply }) => {
 
   const handleShare = () => {
     Share.share({
-      message: `${job.title} - ${payLabel} - ${job.location.label} (via KaamSaathi)`,
+      message: `${job.title} - ${payLabel} - ${job.location.label} (via AnyWork)`,
     }).catch(() => {});
   };
 

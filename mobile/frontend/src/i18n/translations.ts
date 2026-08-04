@@ -3,7 +3,7 @@ export type Language = 'en' | 'hi';
 export const translations = {
   en: {
     // Common
-    appName: 'KaamSaathi',
+    appName: 'AnyWork',
     next: 'Next',
     back: 'Back',
     skip: 'Skip',
@@ -146,7 +146,7 @@ export const translations = {
     typeMessage: 'Type a message...',
   },
   hi: {
-    appName: 'काम साथी',
+    appName: 'AnyWork',
     next: 'आगे',
     back: 'वापस',
     skip: 'छोड़ें',

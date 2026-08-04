@@ -2,7 +2,7 @@ require('dotenv').config({ path: __dirname + '/.env' });
 
 module.exports = {
   expo: {
-    name: 'KaamSaathi',
+    name: 'AnyWork',
     slug: 'kaamsaathi',
     version: '1.0.0',
     orientation: 'portrait',
@@ -14,9 +14,9 @@ module.exports = {
       bundleIdentifier: 'com.kaamsaathi.app',
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
-          'KaamSaathi uses your location to show nearby jobs and let you set your work location.',
-        NSPhotoLibraryUsageDescription: 'KaamSaathi needs access to your photos so you can set a profile picture.',
-        NSCameraUsageDescription: 'KaamSaathi needs camera access so you can take a profile picture.',
+          'AnyWork uses your location to show nearby jobs and let you set your work location.',
+        NSPhotoLibraryUsageDescription: 'AnyWork needs access to your photos so you can set a profile picture.',
+        NSCameraUsageDescription: 'AnyWork needs camera access so you can take a profile picture.',
       },
     },
     android: {
@@ -38,13 +38,13 @@ module.exports = {
         'expo-location',
         {
           locationWhenInUsePermission:
-            'KaamSaathi uses your location to show nearby jobs and let you set your work location.',
+            'AnyWork uses your location to show nearby jobs and let you set your work location.',
         },
       ],
       [
         'expo-image-picker',
         {
-          photosPermission: 'KaamSaathi needs access to your photos so you can set a profile picture.',
+          photosPermission: 'AnyWork needs access to your photos so you can set a profile picture.',
         },
       ],
       'expo-font',

@@ -32,7 +32,7 @@ export const LoginPage = () => {
     <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-2xl">KaamSaathi Admin</CardTitle>
+          <CardTitle className="text-2xl">AnyWork Admin</CardTitle>
           <CardDescription>Sign in with your admin email and password.</CardDescription>
         </CardHeader>
         <CardContent>

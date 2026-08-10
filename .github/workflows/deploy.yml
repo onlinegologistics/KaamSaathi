@@ -95,5 +95,11 @@ jobs:
             chmod 600 .env
             docker compose pull
             docker compose up -d --remove-orphans
+            # nginx (gateway) resolves upstream container names to an IP once at startup
+            # and caches it for its whole lifetime. Since its own image never changes,
+            # `up -d` above never recreates it — so after mobile-backend/website-backend
+            # get new containers (new IPs) above, gateway would keep proxying to the old,
+            # dead IPs until something restarts it. Do that here on every deploy.
+            docker compose restart gateway
             docker image prune -f
             docker exec giftme-caddy-1 caddy reload --config /etc/caddy/Caddyfile || true

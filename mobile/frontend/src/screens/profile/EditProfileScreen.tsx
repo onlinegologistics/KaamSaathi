@@ -6,14 +6,22 @@ import { ScreenContainer } from '../../components/ScreenContainer';
 import { IconButton } from '../../components/IconButton';
 import { ProfileForm, ProfileFormHandle, ProfileFormValues } from '../../components/ProfileForm';
 import { useApp } from '../../context/AppContext';
-import { ProfileStackParamList } from '../../navigation/types';
+import type { ProfileStackParamList } from '../../navigation/types';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'EditProfile'>;
 
-export const EditProfileScreen: React.FC<Props> = ({ navigation }) => {
+const titleBySection = {
+  profile: 'Edit Profile',
+  kyc: 'KYC',
+  wallet: 'Wallet Setup',
+};
+
+export const EditProfileScreen: React.FC<Props> = ({ navigation, route }) => {
   const { currentUser, updateProfile } = useApp();
   const [submitting, setSubmitting] = useState(false);
   const formRef = useRef<ProfileFormHandle>(null);
+  const section = route.params?.section ?? 'profile';
+  const kycApproved = section === 'kyc' && currentUser?.kyc?.status === 'verified';
 
   const handleSubmit = async (values: ProfileFormValues) => {
     setSubmitting(true);
@@ -29,16 +37,20 @@ export const EditProfileScreen: React.FC<Props> = ({ navigation }) => {
     <ScreenContainer>
       <View style={styles.header}>
         <IconButton name="arrow-left" accessibilityLabel="Back" onPress={() => navigation.goBack()} />
-        <Text style={styles.headerTitle}>Edit Profile</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Save Changes"
-          disabled={submitting}
-          onPress={() => formRef.current?.submit()}
-          style={({ pressed }) => [styles.saveAction, pressed && styles.pressed, submitting && styles.disabled]}
-        >
-          <Text style={styles.saveText}>{submitting ? 'Saving...' : 'Save'}</Text>
-        </Pressable>
+        <Text style={styles.headerTitle}>{titleBySection[section]}</Text>
+        {!kycApproved ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Save Changes"
+            disabled={submitting}
+            onPress={() => formRef.current?.submit()}
+            style={({ pressed }) => [styles.saveAction, pressed && styles.pressed, submitting && styles.disabled]}
+          >
+            <Text style={styles.saveText}>{submitting ? 'Saving...' : 'Save'}</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.saveAction} />
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
@@ -47,6 +59,7 @@ export const EditProfileScreen: React.FC<Props> = ({ navigation }) => {
           initialUser={currentUser}
           submitLabel="Save Changes"
           submitting={submitting}
+          section={section}
           onSubmit={handleSubmit}
         />
       </ScrollView>

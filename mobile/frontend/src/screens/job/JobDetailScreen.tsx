@@ -9,6 +9,8 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { theme } from '../../theme';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { Button } from '../../components/Button';
+import { ReportModal } from '../../components/ReportModal';
+import { startJobCall } from '../../utils/call';
 import { getCategoryMeta } from '../../data/categories';
 import { getJob, getJobChat, BackendJob } from '../../services/api';
 import { formatDurationHours } from '../../utils/jobAdapter';
@@ -28,12 +30,14 @@ type Props = Omit<NativeStackScreenProps<HomeStackParamList | SearchStackParamLi
 export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { jobId } = route.params;
   const insets = useSafeAreaInsets();
-  const { t, accessToken, currentUser, toggleBookmark, bookmarkedJobIds, applyToJob, cancelAcceptedJob } = useApp();
+  const { t, accessToken, currentUser, toggleBookmark, bookmarkedJobIds, applyToJob, cancelAcceptedJob, categories } = useApp();
   const [job, setJob] = useState<BackendJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [openingChat, setOpeningChat] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
+  const [calling, setCalling] = useState(false);
 
   const fetchJob = useCallback(() => {
     if (!accessToken) return;
@@ -55,7 +59,7 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }
 
-  const category = getCategoryMeta(job.category);
+  const category = getCategoryMeta(job.category, categories);
   const isBookmarked = bookmarkedJobIds.includes(job._id);
   const isPoster = currentUser?.id === job.postedBy._id;
   const myApplication = job.applicants.find((a) => a.userId._id === currentUser?.id);
@@ -100,6 +104,16 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   };
 
+  const handleCall = async () => {
+    if (!accessToken || calling) return;
+    setCalling(true);
+    try {
+      await startJobCall(accessToken, job._id);
+    } finally {
+      setCalling(false);
+    }
+  };
+
   const confirmCancelAccepted = () => {
     Alert.alert(
       'Cancel work?',
@@ -127,7 +141,8 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   };
 
   return (
-    <ScreenContainer edges={['left', 'right']} style={styles.container}>
+    <>
+      <ScreenContainer edges={['left', 'right']} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <LinearGradient
           colors={[theme.colors.primary, theme.colors.primaryDark]}
@@ -160,18 +175,28 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               </Pressable>
 
               {!isPoster ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('bookmarked')}
-                  onPress={() => toggleBookmark(job._id)}
-                  style={styles.heroIconBtn}
-                >
-                  <MaterialCommunityIcons
-                    name={isBookmarked ? 'heart' : 'heart-outline'}
-                    size={22}
-                    color={theme.colors.textInverse}
-                  />
-                </Pressable>
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('bookmarked')}
+                    onPress={() => toggleBookmark(job._id)}
+                    style={styles.heroIconBtn}
+                  >
+                    <MaterialCommunityIcons
+                      name={isBookmarked ? 'heart' : 'heart-outline'}
+                      size={22}
+                      color={theme.colors.textInverse}
+                    />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('reportJob')}
+                    onPress={() => setReportVisible(true)}
+                    style={styles.heroIconBtn}
+                  >
+                    <MaterialCommunityIcons name="flag-outline" size={22} color={theme.colors.textInverse} />
+                  </Pressable>
+                </>
               ) : null}
             </View>
           </View>
@@ -204,11 +229,18 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           <Text style={styles.description}>{job.description}</Text>
 
           <View style={styles.detailRows}>
-            <DetailRow icon="briefcase-outline" label="Type" value={t(category.labelKey)} />
+            <DetailRow icon="briefcase-outline" label="Type" value={category.label} />
             <DetailRow icon="timer-outline" label={t('duration')} value={formatDurationHours(job.duration)} />
             <DetailRow icon="account-group-outline" label={t('peopleNeededLabel')} value={`${job.peopleNeeded}`} />
             <DetailRow icon="map-marker-outline" label={t('location')} value={job.location.address} />
             <DetailRow icon="calendar-clock" label="Scheduled For" value={new Date(job.scheduledFor).toLocaleString()} />
+            <DetailRow
+              icon="clock-check-outline"
+              label={t('expectedCompletionLabel')}
+              value={new Date(
+                job.endAt ?? new Date(job.scheduledFor).getTime() + job.duration * 60 * 60 * 1000
+              ).toLocaleString()}
+            />
             <DetailRow icon="account-outline" label="Posted By" value={job.postedBy.name || 'User'} />
           </View>
 
@@ -253,12 +285,31 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           />
         ) : myApplication?.status === 'accepted' ? (
           <View style={styles.acceptedFooterActions}>
+            <View style={styles.callChatRow}>
+              <Button
+                label="Call"
+                onPress={handleCall}
+                loading={calling}
+                style={styles.callChatBtn}
+                variant="outline"
+                icon={<MaterialCommunityIcons name="phone-outline" size={20} color={theme.colors.primary} />}
+              />
+              <Button
+                label="Message"
+                onPress={openChat}
+                loading={openingChat}
+                style={styles.callChatBtn}
+                icon={<MaterialCommunityIcons name="chat-processing-outline" size={20} color={theme.colors.textInverse} />}
+              />
+            </View>
             <Button
-              label="Message Poster"
-              onPress={openChat}
-              loading={openingChat}
+              label="Live Location"
+              onPress={() =>
+                navigation.navigate('LiveLocation', { jobId: job._id, otherUserName: job.postedBy.name || 'User' })
+              }
+              variant="outline"
               fullWidth
-              icon={<MaterialCommunityIcons name="chat-processing-outline" size={20} color={theme.colors.textInverse} />}
+              icon={<MaterialCommunityIcons name="map-marker-radius-outline" size={20} color={theme.colors.primary} />}
             />
             {!job.workerOtp?.verifiedAt ? (
               <Button
@@ -287,7 +338,9 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           />
         )}
       </View>
-    </ScreenContainer>
+      </ScreenContainer>
+      <ReportModal visible={reportVisible} targetType="job" targetId={job._id} onClose={() => setReportVisible(false)} />
+    </>
   );
 };
 
@@ -471,5 +524,12 @@ const styles = StyleSheet.create({
   },
   acceptedFooterActions: {
     gap: theme.spacing.sm,
+  },
+  callChatRow: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
+  callChatBtn: {
+    flex: 1,
   },
 });

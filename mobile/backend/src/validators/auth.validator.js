@@ -19,6 +19,15 @@ const verifyOtpSchema = Joi.object({
   params: Joi.object({}),
 });
 
+const loginWithPasswordSchema = Joi.object({
+  body: Joi.object({
+    phone: phone.required(),
+    password: Joi.string().trim().min(6).max(200).required(),
+  }).required(),
+  query: Joi.object({}),
+  params: Joi.object({}),
+});
+
 const refreshSchema = Joi.object({
   body: Joi.object({
     refreshToken: Joi.string().trim().required(),
@@ -27,4 +36,4 @@ const refreshSchema = Joi.object({
   params: Joi.object({}),
 });
 
-module.exports = { sendOtpSchema, verifyOtpSchema, refreshSchema };
+module.exports = { loginWithPasswordSchema, sendOtpSchema, verifyOtpSchema, refreshSchema };

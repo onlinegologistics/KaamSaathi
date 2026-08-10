@@ -33,6 +33,15 @@ export const ReportsQueuePage = () => {
     { id: 'type', header: 'Type', cell: ({ row }) => <span className="capitalize">{row.original.targetType}</span> },
     { accessorKey: 'reason', header: 'Reason' },
     {
+      id: 'description',
+      header: 'Description',
+      cell: ({ row }) => (
+        <span className="block max-w-xs truncate text-muted-foreground" title={row.original.description}>
+          {row.original.description || '—'}
+        </span>
+      ),
+    },
+    {
       id: 'reporter',
       header: 'Reported By',
       cell: ({ row }) => {

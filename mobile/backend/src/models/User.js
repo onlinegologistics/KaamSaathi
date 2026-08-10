@@ -47,6 +47,204 @@ const aadhaarVerificationSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const workerProfileSchema = new mongoose.Schema(
+  {
+    skills: {
+      type: [String],
+      default: [],
+    },
+    experienceYears: {
+      type: Number,
+      min: 0,
+      max: 80,
+      default: undefined,
+    },
+    preferredWorkCategories: {
+      type: [String],
+      default: [],
+    },
+    workRadiusKm: {
+      type: Number,
+      min: 0,
+      max: 500,
+      default: undefined,
+    },
+  },
+  { _id: false }
+);
+
+const employerProfileSchema = new mongoose.Schema(
+  {
+    kind: {
+      type: String,
+      enum: ['individual', 'company'],
+      default: 'individual',
+    },
+    companyName: {
+      type: String,
+      trim: true,
+      maxlength: 160,
+      default: '',
+    },
+    gstNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      maxlength: 20,
+      default: '',
+    },
+    officeAddress: {
+      type: String,
+      trim: true,
+      maxlength: 300,
+      default: '',
+    },
+    companyLogoUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    companyVerificationRequested: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { _id: false }
+);
+
+const categoryDocumentSchema = new mongoose.Schema(
+  {
+    category: {
+      type: String,
+      required: true,
+    },
+    label: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+      required: true,
+    },
+    documentUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+  },
+  { _id: false }
+);
+
+const kycSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ['not_started', 'submitted', 'verified', 'rejected'],
+      default: 'not_started',
+      index: true,
+    },
+    aadhaarCardUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    selfieUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    drivingLicenseUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    categoryDocuments: {
+      type: [categoryDocumentSchema],
+      default: [],
+    },
+    submittedAt: {
+      type: Date,
+      default: undefined,
+    },
+    verifiedAt: {
+      type: Date,
+      default: undefined,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      maxlength: 300,
+      default: '',
+    },
+  },
+  { _id: false }
+);
+
+const walletSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ['not_started', 'submitted', 'verified', 'rejected'],
+      default: 'not_started',
+      index: true,
+    },
+    upiId: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: '',
+    },
+    bankAccountNumber: {
+      type: String,
+      trim: true,
+      maxlength: 34,
+      default: '',
+    },
+    bankAccountHolderName: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+      default: '',
+    },
+    ifscCode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      maxlength: 11,
+      default: '',
+    },
+    panNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      maxlength: 10,
+      default: '',
+    },
+    balance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    setupCompletedAt: {
+      type: Date,
+      default: undefined,
+    },
+    submittedAt: {
+      type: Date,
+      default: undefined,
+    },
+    verifiedAt: {
+      type: Date,
+      default: undefined,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      maxlength: 300,
+      default: '',
+    },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -76,6 +274,15 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: undefined,
     },
+    gender: {
+      type: String,
+      enum: ['male', 'female', 'other', 'prefer_not_to_say'],
+      default: undefined,
+    },
+    languages: {
+      type: [String],
+      default: [],
+    },
     education: {
       type: String,
       trim: true,
@@ -87,6 +294,41 @@ const userSchema = new mongoose.Schema(
       trim: true,
       maxlength: 300,
       default: '',
+    },
+    accountType: {
+      type: String,
+      enum: ['worker', 'employer', 'both'],
+      default: 'worker',
+      index: true,
+    },
+    termsAccepted: {
+      type: Boolean,
+      default: false,
+    },
+    termsAcceptedAt: {
+      type: Date,
+      default: undefined,
+    },
+    passwordHash: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    workerProfile: {
+      type: workerProfileSchema,
+      default: () => ({}),
+    },
+    employerProfile: {
+      type: employerProfileSchema,
+      default: () => ({}),
+    },
+    kyc: {
+      type: kycSchema,
+      default: () => ({}),
+    },
+    wallet: {
+      type: walletSchema,
+      default: () => ({}),
     },
     location: {
       type: geoPointSchema,
@@ -140,6 +382,7 @@ const userSchema = new mongoose.Schema(
     toJSON: {
       transform(_doc, ret) {
         delete ret.__v;
+        delete ret.passwordHash;
         return ret;
       },
     },

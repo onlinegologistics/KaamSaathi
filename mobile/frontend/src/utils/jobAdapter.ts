@@ -27,6 +27,15 @@ const isSameCalendarDay = (isoDate: string) => {
 
 export const formatDurationHours = (hours: number): string => `${hours} hour${hours === 1 ? '' : 's'}`;
 
+export const formatTimeLabel = (isoDate: string): string =>
+  new Date(isoDate).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+// Older jobs (posted before endAt existed) never got one persisted — derive it the same way
+// the backend does (scheduledFor + duration hours) so the UI never shows a blank end time.
+const HOUR_MS = 60 * 60 * 1000;
+const resolveEndAt = (job: BackendJob): string =>
+  job.endAt ?? new Date(new Date(job.scheduledFor).getTime() + job.duration * HOUR_MS).toISOString();
+
 /**
  * Maps a real BackendJob into the Job shape screens already render. The real
  * Job model has no per-day/per-hour pay distinction, so payType is always
@@ -50,15 +59,21 @@ export const toJobViewModel = (
     title: job.title,
     description: job.description,
     category: job.category as JobCategory,
+    categoryGroup: job.categoryGroup,
     pay: job.payAmount,
     payType: 'fixed',
     location: { latitude: lat, longitude: lng, label: job.location.address },
     distanceKm,
+    durationHours: job.duration,
     durationLabel: formatDurationHours(job.duration),
     peopleNeeded: job.peopleNeeded,
     peopleApplied: job.applicants.length,
     postedAt: job.createdAt,
     date: job.scheduledFor,
     isToday: isSameCalendarDay(job.scheduledFor),
+    startAt: job.scheduledFor,
+    endAt: resolveEndAt(job),
+    startTimeLabel: formatTimeLabel(job.scheduledFor),
+    suggestedMinimumPrice: job.suggestedMinimumPrice,
   };
 };

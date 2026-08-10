@@ -43,7 +43,7 @@ export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
           <SettingAction
             icon="account-edit-outline"
             label={t('editProfile')}
-            onPress={() => navigation.navigate('EditProfile')}
+            onPress={() => navigation.navigate('EditProfile', { section: 'profile' })}
           />
           <SettingAction icon="logout" label={t('logout')} destructive onPress={confirmLogout} />
         </View>

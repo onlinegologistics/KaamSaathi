@@ -4,10 +4,12 @@ const app = require('./app');
 const connectDB = require('./config/db');
 const env = require('./config/env');
 const { attachSocket } = require('./socket');
+const { ensureDefaultCategories } = require('./services/categoryService');
 
 const start = async () => {
   try {
     await connectDB();
+    await ensureDefaultCategories();
 
     const httpServer = http.createServer(app);
     const io = new Server(httpServer, {

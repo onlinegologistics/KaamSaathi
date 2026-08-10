@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, Share } from 'react-native';
+import { Alert, View, Text, StyleSheet, Pressable, Share } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { Job } from '../types';
@@ -21,6 +21,11 @@ const timeAgo = (iso: string) => {
   return `${Math.floor(hrs / 24)}d ago`;
 };
 
+const startLabel = (job: Job) => {
+  const day = job.isToday ? 'Today' : new Date(job.startAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return `${day} • ${job.startTimeLabel}`;
+};
+
 export const JobCard: React.FC<JobCardProps> = ({ job, onPress, onApply }) => {
   const { t, bookmarkedJobIds, toggleBookmark, appliedJobIds } = useApp();
   const isBookmarked = bookmarkedJobIds.includes(job.id);
@@ -33,6 +38,12 @@ export const JobCard: React.FC<JobCardProps> = ({ job, onPress, onApply }) => {
     Share.share({
       message: `${job.title} - ${payLabel} - ${job.location.label} (via AnyWork)`,
     }).catch(() => {});
+  };
+
+  const handleApply = () => {
+    Promise.resolve(onApply()).catch((error) => {
+      Alert.alert('Action needed', error instanceof Error ? error.message : 'Please try again.');
+    });
   };
 
   return (
@@ -76,8 +87,9 @@ export const JobCard: React.FC<JobCardProps> = ({ job, onPress, onApply }) => {
       </Text>
 
       <View style={styles.statsRow}>
-        <Stat icon="map-marker-distance" text={`${job.distanceKm} km away`} />
+        <Stat icon="calendar-clock-outline" text={startLabel(job)} />
         <Stat icon="timer-outline" text={job.durationLabel} />
+        <Stat icon="map-marker-distance" text={`${job.distanceKm} km away`} />
         <Stat icon="account-group-outline" text={`${job.peopleNeeded} needed`} />
       </View>
 
@@ -85,7 +97,7 @@ export const JobCard: React.FC<JobCardProps> = ({ job, onPress, onApply }) => {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={hasApplied ? t('applied') : t('applyNow')}
-          onPress={onApply}
+          onPress={handleApply}
           disabled={hasApplied}
           style={({ pressed }) => [
             styles.applyBtn,
@@ -209,12 +221,13 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
     marginTop: theme.spacing.lg,
-    gap: theme.spacing.xs,
+    columnGap: theme.spacing.md,
+    rowGap: theme.spacing.xs,
   },
   statItem: {
-    flex: 1,
+    flexBasis: '45%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,

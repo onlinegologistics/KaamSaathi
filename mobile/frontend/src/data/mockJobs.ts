@@ -11,6 +11,18 @@ const posterOf = (u: (typeof mockUsers)[number]) => ({
   verified: u.verified,
 });
 
+// Derives the startAt/endAt/durationHours/startTimeLabel fields this fixture data didn't
+// originally carry, from the same (durationLabel hours, date) pair each entry already used.
+const deriveTiming = (hours: number, dateIso: string) => {
+  const start = new Date(dateIso);
+  return {
+    durationHours: hours,
+    startAt: dateIso,
+    endAt: new Date(start.getTime() + hours * 3600 * 1000).toISOString(),
+    startTimeLabel: start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }),
+  };
+};
+
 export const mockJobsBase: Job[] = [
   {
     id: 'j1',
@@ -30,6 +42,7 @@ export const mockJobsBase: Job[] = [
     postedAt: hoursAgo(2),
     date: today,
     isToday: true,
+    ...deriveTiming(6, today),
   },
   {
     id: 'j2',
@@ -49,6 +62,7 @@ export const mockJobsBase: Job[] = [
     postedAt: hoursAgo(5),
     date: inDays(1),
     isToday: false,
+    ...deriveTiming(2, inDays(1)),
   },
   {
     id: 'j3',
@@ -68,6 +82,7 @@ export const mockJobsBase: Job[] = [
     postedAt: hoursAgo(1),
     date: today,
     isToday: true,
+    ...deriveTiming(5, today),
   },
   {
     id: 'j4',
@@ -87,6 +102,7 @@ export const mockJobsBase: Job[] = [
     postedAt: hoursAgo(8),
     date: inDays(2),
     isToday: false,
+    ...deriveTiming(8, inDays(2)),
   },
   {
     id: 'j5',
@@ -106,6 +122,7 @@ export const mockJobsBase: Job[] = [
     postedAt: hoursAgo(12),
     date: today,
     isToday: true,
+    ...deriveTiming(4, today),
   },
   {
     id: 'j6',
@@ -125,6 +142,7 @@ export const mockJobsBase: Job[] = [
     postedAt: hoursAgo(20),
     date: inDays(3),
     isToday: false,
+    ...deriveTiming(7, inDays(3)),
   },
   {
     id: 'j7',
@@ -143,6 +161,7 @@ export const mockJobsBase: Job[] = [
     postedAt: hoursAgo(30),
     date: inDays(1),
     isToday: false,
+    ...deriveTiming(8, inDays(1)),
   },
   {
     id: 'j8',
@@ -161,6 +180,7 @@ export const mockJobsBase: Job[] = [
     postedAt: hoursAgo(3),
     date: today,
     isToday: true,
+    ...deriveTiming(1, today),
   },
   {
     id: 'j9',
@@ -179,6 +199,7 @@ export const mockJobsBase: Job[] = [
     postedAt: hoursAgo(0.5),
     date: today,
     isToday: true,
+    ...deriveTiming(4, today),
   },
   {
     id: 'j10',
@@ -197,6 +218,7 @@ export const mockJobsBase: Job[] = [
     postedAt: hoursAgo(15),
     date: inDays(1),
     isToday: false,
+    ...deriveTiming(3, inDays(1)),
   },
 ];
 

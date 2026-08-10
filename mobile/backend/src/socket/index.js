@@ -1,6 +1,9 @@
 const { verifyAccessToken } = require('../middleware/auth');
 const chatService = require('../services/chatService');
+const locationService = require('../services/locationService');
 const Chat = require('../models/Chat');
+
+const locationRoom = (jobId) => `job:${jobId}:location`;
 
 const socketAuthMiddleware = async (socket, next) => {
   try {
@@ -61,6 +64,58 @@ const attachSocket = (io) => {
         ack?.({ ok: true });
       } catch (error) {
         ack?.({ ok: false, error: error.code || error.message || 'MARK_READ_FAILED' });
+      }
+    });
+
+    // Live location — foreground-only sharing, scoped to one job's room so it's only ever
+    // visible to the poster/accepted-worker pair on that specific active job.
+    socket.on('location:join', async ({ jobId }, ack) => {
+      try {
+        await locationService.assertCanShareLocation(jobId, socket.user._id);
+        socket.join(locationRoom(jobId));
+        ack?.({ ok: true });
+      } catch (error) {
+        ack?.({ ok: false, error: error.code || error.message || 'LOCATION_JOIN_FAILED' });
+      }
+    });
+
+    socket.on('location:update', async ({ jobId, latitude, longitude, accuracy, heading, speed }, ack) => {
+      try {
+        await locationService.assertCanShareLocation(jobId, socket.user._id);
+        await locationService.recordLocationUpdate({
+          jobId,
+          userId: socket.user._id,
+          latitude,
+          longitude,
+          accuracy,
+          heading,
+          speed,
+        });
+        // userId/timestamp are server-set — never trust those off the payload.
+        socket.to(locationRoom(jobId)).emit('location:update', {
+          jobId,
+          userId: socket.user._id.toString(),
+          latitude,
+          longitude,
+          accuracy,
+          heading,
+          speed,
+          timestamp: new Date().toISOString(),
+        });
+        ack?.({ ok: true });
+      } catch (error) {
+        ack?.({ ok: false, error: error.code || error.message || 'LOCATION_UPDATE_FAILED' });
+      }
+    });
+
+    socket.on('location:stop', async ({ jobId }, ack) => {
+      try {
+        await locationService.stopSharing({ jobId, userId: socket.user._id });
+        socket.to(locationRoom(jobId)).emit('location:stopped', { jobId, userId: socket.user._id.toString() });
+        socket.leave(locationRoom(jobId));
+        ack?.({ ok: true });
+      } catch (error) {
+        ack?.({ ok: false, error: error.code || error.message || 'LOCATION_STOP_FAILED' });
       }
     });
   });

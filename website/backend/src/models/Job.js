@@ -106,6 +106,17 @@ const jobSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // Mirrors mobile-backend/src/models/Job.js — mobile-backend computes/owns this field;
+    // it's declared here too so admin edits (which re-save the whole document) don't drop it.
+    endAt: {
+      type: Date,
+      default: undefined,
+    },
+    suggestedMinimumPrice: {
+      type: Number,
+      min: 0,
+      default: undefined,
+    },
   },
   {
     timestamps: true,

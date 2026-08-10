@@ -5,6 +5,8 @@ export interface UserFilters {
   search?: string;
   isBlocked?: boolean;
   isVerified?: boolean;
+  kycStatus?: string;
+  walletStatus?: string;
   minRating?: number;
   location?: string;
   page?: number;
@@ -46,5 +48,25 @@ export const unblockUser = async (id: string) => {
 
 export const verifyUser = async (id: string) => {
   const { data } = await client.put<{ success: true; user: User }>(`/users/${id}/verify`);
+  return data.user;
+};
+
+export const approveKyc = async (id: string) => {
+  const { data } = await client.put<{ success: true; user: User }>(`/users/${id}/kyc/approve`);
+  return data.user;
+};
+
+export const rejectKyc = async ({ id, reason }: { id: string; reason?: string }) => {
+  const { data } = await client.put<{ success: true; user: User }>(`/users/${id}/kyc/reject`, { reason });
+  return data.user;
+};
+
+export const approveWallet = async (id: string) => {
+  const { data } = await client.put<{ success: true; user: User }>(`/users/${id}/wallet/approve`);
+  return data.user;
+};
+
+export const rejectWallet = async ({ id, reason }: { id: string; reason?: string }) => {
+  const { data } = await client.put<{ success: true; user: User }>(`/users/${id}/wallet/reject`, { reason });
   return data.user;
 };

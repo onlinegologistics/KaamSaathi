@@ -1,3 +1,4 @@
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const User = require('../models/User');
@@ -10,6 +11,41 @@ const { issueTokenPair } = require('../utils/tokens');
 const { normalizePhone } = require('../utils/phone');
 
 const generateOtp = () => String(Math.floor(1000 + Math.random() * 9000));
+
+const loginWithPassword = asyncHandler(async (req, res) => {
+  const phone = normalizePhone(req.body.phone);
+  const { password } = req.body;
+
+  const user = await User.findOne({ phone });
+  if (!user || !user.name) {
+    throw new ApiError(404, 'No account found. Please register first.', 'USER_NOT_REGISTERED');
+  }
+
+  if (!user.isActive) {
+    throw new ApiError(401, 'User session is no longer active', 'USER_INACTIVE');
+  }
+
+  if (user.isBlocked) {
+    throw new ApiError(403, 'User is blocked', 'USER_BLOCKED');
+  }
+
+  if (!user.passwordHash) {
+    throw new ApiError(401, 'Password login is not set up. Please use OTP login.', 'PASSWORD_NOT_SET');
+  }
+
+  const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+  if (!passwordMatches) {
+    throw new ApiError(401, 'Invalid phone number or password', 'INVALID_CREDENTIALS');
+  }
+
+  const tokens = await issueTokenPair(user);
+  res.json({
+    success: true,
+    user,
+    isNewUser: false,
+    ...tokens,
+  });
+});
 
 const sendOtp = asyncHandler(async (req, res) => {
   const phone = normalizePhone(req.body.phone);
@@ -141,4 +177,4 @@ const logout = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Logged out' });
 });
 
-module.exports = { sendOtp, verifyOtp, refresh, logout };
+module.exports = { loginWithPassword, sendOtp, verifyOtp, refresh, logout };

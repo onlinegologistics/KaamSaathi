@@ -22,7 +22,9 @@ app.set('trust proxy', env.trustProxy);
 app.use(helmet());
 app.use(cors(corsOptions));
 app.use(compression());
-app.use(express.json({ limit: '1mb' }));
+// Profile/KYC photos are submitted as base64 data URIs (no separate upload endpoint),
+// and a single KYC submission can bundle several images (Aadhaar + selfie + category docs).
+app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(globalLimiter);
 

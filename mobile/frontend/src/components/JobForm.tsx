@@ -8,15 +8,34 @@ import { Button } from './Button';
 import { Input } from './Input';
 import { LocationPickerModal } from './LocationPickerModal';
 import { CategoryPickerSheet } from './CategoryPickerSheet';
-import { categories } from '../data/categories';
 import { useApp } from '../context/AppContext';
-import { ApiRequestError, BackendJob, CreateJobPayload } from '../services/api';
+import { ApiRequestError, BackendJob, CreateJobPayload, getPriceSuggestion, PriceSuggestion } from '../services/api';
 import { JobCategory } from '../types';
 
 const MIN_DURATION_HOURS = 1;
 const MAX_DURATION_HOURS = 8;
 const MIN_PEOPLE = 1;
 const MAX_PEOPLE = 3;
+const DURATION_PRESETS = [1, 2, 3, 4, 6, 8];
+const PRICE_SUGGESTION_DEBOUNCE_MS = 500;
+
+const formatClockTime = (date: Date) =>
+  date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+// The location picker only ever hands back one free-text label (GPS reverse-geocode gives
+// "district, city"; a searched/dropped pin gives a Places-style address) — there's no
+// separate city/area selector anywhere in this flow. Splitting on commas and treating the
+// last segment as city / first as area is a heuristic, not a guarantee: if it misses, the
+// price-suggestion API just falls back to a category or global default (never blocks posting).
+const deriveCityArea = (label: string): { city: string; area: string } => {
+  const parts = label
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length >= 2) return { area: parts[0], city: parts[parts.length - 1] };
+  if (parts.length === 1) return { area: '', city: parts[0] };
+  return { area: '', city: '' };
+};
 
 export interface JobFormValues {
   category: JobCategory;
@@ -44,11 +63,14 @@ const toInitialLocation = (job: BackendJob) => {
 type LocationValue = { latitude: number; longitude: number; label: string };
 
 export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submitting, onSubmit }) => {
-  const { t } = useApp();
+  const { t, categories, accessToken } = useApp();
   const [category, setCategory] = useState<JobCategory | null>((initialJob?.category as JobCategory) ?? null);
   const [title, setTitle] = useState(initialJob?.title ?? '');
   const [description, setDescription] = useState(initialJob?.description ?? '');
   const [duration, setDuration] = useState(initialJob?.duration ?? MIN_DURATION_HOURS);
+  const [customDurationMode, setCustomDurationMode] = useState(
+    !!initialJob && !DURATION_PRESETS.includes(initialJob.duration)
+  );
   const [pay, setPay] = useState(initialJob ? String(initialJob.payAmount) : '');
   const [people, setPeople] = useState(initialJob?.peopleNeeded ?? MIN_PEOPLE);
   const [location, setLocation] = useState<LocationValue | null>(initialJob ? toInitialLocation(initialJob) : null);
@@ -94,6 +116,29 @@ export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submi
   );
   const [pickerVisible, setPickerVisible] = useState(false);
   const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
+  const [priceSuggestion, setPriceSuggestion] = useState<PriceSuggestion | null>(null);
+
+  useEffect(() => {
+    if (!accessToken || !category || !location) {
+      setPriceSuggestion(null);
+      return;
+    }
+    const { city, area } = deriveCityArea(location.label);
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      getPriceSuggestion(accessToken, { city, area, category, durationMinutes: duration * 60 })
+        .then((res) => {
+          if (!cancelled) setPriceSuggestion(res.data);
+        })
+        .catch(() => {
+          if (!cancelled) setPriceSuggestion(null);
+        });
+    }, PRICE_SUGGESTION_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [accessToken, category, location, duration]);
 
   const openDateTimePicker = () => {
     if (Platform.OS !== 'android') {
@@ -148,11 +193,14 @@ export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submi
       return;
     }
     try {
+      const { city, area } = deriveCityArea(location.label);
       await onSubmit({
         category,
         title: title.trim(),
         description: description.trim(),
         location: { lat: location.latitude, lng: location.longitude, address: location.label },
+        city,
+        area,
         duration,
         payAmount: Number(pay),
         peopleNeeded: people,
@@ -176,7 +224,7 @@ export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submi
       <Text style={styles.sectionLabel}>{t('selectCategory')}</Text>
       <Pressable style={styles.selectBox} onPress={() => setCategoryPickerVisible(true)}>
         <Text style={category ? styles.locationText : styles.selectPlaceholder}>
-          {category ? t(categories.find((c) => c.key === category)?.labelKey ?? 'delivery') : t('selectCategory')}
+          {category ? categories.find((c) => c.key === category)?.label ?? category : t('selectCategory')}
         </Text>
         <MaterialCommunityIcons name="chevron-down" size={22} color={theme.colors.textSecondary} />
       </Pressable>
@@ -194,13 +242,53 @@ export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submi
       </View>
 
       <Text style={styles.sectionLabel}>{t('duration')}</Text>
-      <Stepper
-        value={duration}
-        min={MIN_DURATION_HOURS}
-        max={MAX_DURATION_HOURS}
-        suffix={duration === 1 ? 'hour' : 'hours'}
-        onChange={setDuration}
-      />
+      <View style={styles.chipRow}>
+        {DURATION_PRESETS.map((hours) => {
+          const selected = !customDurationMode && duration === hours;
+          return (
+            <Pressable
+              key={hours}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => {
+                setCustomDurationMode(false);
+                setDuration(hours);
+              }}
+              style={[styles.chip, selected && styles.chipActive]}
+            >
+              <Text style={[styles.chipText, selected && styles.chipTextActive]}>
+                {hours} {hours === 1 ? 'hr' : 'hrs'}
+              </Text>
+            </Pressable>
+          );
+        })}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: customDurationMode }}
+          onPress={() => setCustomDurationMode(true)}
+          style={[styles.chip, customDurationMode && styles.chipActive]}
+        >
+          <Text style={[styles.chipText, customDurationMode && styles.chipTextActive]}>{t('customDuration')}</Text>
+        </Pressable>
+      </View>
+      {customDurationMode && (
+        <Stepper
+          value={duration}
+          min={MIN_DURATION_HOURS}
+          max={MAX_DURATION_HOURS}
+          suffix={duration === 1 ? 'hour' : 'hours'}
+          onChange={setDuration}
+        />
+      )}
+
+      {priceSuggestion && (
+        <View style={styles.priceSuggestionCard}>
+          <MaterialCommunityIcons name="cash-check" size={18} color={theme.colors.success} />
+          <Text style={styles.priceSuggestionText}>
+            Recommended minimum: ₹{priceSuggestion.suggestedMinimum}
+          </Text>
+        </View>
+      )}
 
       <Input
         label={t('payAmount')}
@@ -209,6 +297,11 @@ export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submi
         onChangeText={(v) => setPay(v.replace(/[^0-9]/g, ''))}
         keyboardType="number-pad"
       />
+      {priceSuggestion && !!pay && Number(pay) < priceSuggestion.suggestedMinimum && (
+        <Text style={styles.priceWarning}>
+          ₹{pay} is below the recommended ₹{priceSuggestion.suggestedMinimum} for this job.
+        </Text>
+      )}
 
       <Text style={styles.sectionLabel}>{t('peopleNeededLabel')}</Text>
       <Stepper
@@ -236,6 +329,20 @@ export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submi
           }}
           onDismiss={() => setPickerVisible(false)}
         />
+      )}
+
+      {scheduledFor && (
+        <View style={styles.summaryCard}>
+          <SummaryRow label={t('jobStartsLabel')} value={scheduledFor.toLocaleString()} />
+          <SummaryRow
+            label={t('expectedDurationLabel')}
+            value={`${duration} ${duration === 1 ? 'hour' : 'hours'}`}
+          />
+          <SummaryRow
+            label={t('expectedEndLabel')}
+            value={formatClockTime(new Date(scheduledFor.getTime() + duration * 60 * 60 * 1000))}
+          />
+        </View>
       )}
 
       <Text style={styles.sectionLabel}>{t('pickLocation')}</Text>
@@ -272,6 +379,13 @@ export const JobForm: React.FC<JobFormProps> = ({ initialJob, submitLabel, submi
     </>
   );
 };
+
+const SummaryRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <View style={styles.summaryRow}>
+    <Text style={styles.summaryLabel}>{label}</Text>
+    <Text style={styles.summaryValue}>{value}</Text>
+  </View>
+);
 
 const Stepper: React.FC<{
   value: number;
@@ -343,6 +457,73 @@ const styles = StyleSheet.create({
   changeText: {
     ...theme.typography.bodyBold,
     color: theme.colors.primary,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.md,
+  },
+  chip: {
+    minHeight: 40,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.pill,
+    paddingHorizontal: theme.spacing.md,
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surface,
+  },
+  chipActive: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  chipText: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+  },
+  chipTextActive: {
+    color: theme.colors.textInverse,
+    fontWeight: '700',
+  },
+  summaryCard: {
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceAlt,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    gap: theme.spacing.xs,
+  },
+  priceSuggestionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.successLight,
+    padding: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
+  },
+  priceSuggestionText: {
+    ...theme.typography.bodyBold,
+    color: theme.colors.success,
+  },
+  priceWarning: {
+    ...theme.typography.caption,
+    color: theme.colors.warning,
+    marginTop: -theme.spacing.sm,
+    marginBottom: theme.spacing.md,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  summaryLabel: {
+    ...theme.typography.body,
+    color: theme.colors.textSecondary,
+  },
+  summaryValue: {
+    ...theme.typography.bodyBold,
+    color: theme.colors.text,
   },
   stepperRow: {
     flexDirection: 'row',

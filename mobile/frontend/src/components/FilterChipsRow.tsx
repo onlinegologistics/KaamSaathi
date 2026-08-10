@@ -26,10 +26,10 @@ export const FilterChipsRow: React.FC<FilterChipsRowProps> = ({
   onTodayToggle,
   onFiltersPress,
 }) => {
-  const { t } = useApp();
+  const { t, categories } = useApp();
   const [pickerVisible, setPickerVisible] = useState(false);
 
-  const allChipLabel = activeCategory === 'all' ? t('allCategories') : t(getCategoryMeta(activeCategory).labelKey);
+  const allChipLabel = activeCategory === 'all' ? t('allCategories') : getCategoryMeta(activeCategory, categories).label;
 
   return (
     <>

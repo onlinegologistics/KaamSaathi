@@ -13,21 +13,58 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'PhoneEntry'>;
 type SocialIcon = 'google' | 'facebook' | 'apple';
 
 export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
-  const { t, requestOtp, remoteSettings } = useApp();
+  const { t, loginWithPassword, requestOtp, remoteSettings } = useApp();
   const [digits, setDigits] = useState('');
+  const [password, setPassword] = useState('');
+  const [useOtpLogin, setUseOtpLogin] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<TextInput>(null);
+  const passwordInputRef = useRef<TextInput>(null);
 
   const content = remoteSettings['mobile.authFlow.content']?.phoneEntry;
   const title = content?.title || 'Enter your phone number';
-  const subtitle = content?.subtitle || "We'll send you a verification code";
-  const sendOtpLabel = content?.sendOtpLabel || t('sendOtp');
+  const subtitle = content?.subtitle || 'Use your password, or continue with OTP';
+  const otpLoginLabel = content?.sendOtpLabel || 'Login with OTP';
 
   const isValid = digits.length === 10;
+  const passwordValue = password.trim();
+  const canPasswordLogin = !useOtpLogin && isValid && passwordValue.length >= 6;
+  const canPrimaryLogin = useOtpLogin ? isValid : canPasswordLogin;
+  const primaryLabel = useOtpLogin
+    ? sending
+      ? 'Sending...'
+      : otpLoginLabel
+    : loggingIn
+      ? 'Logging in...'
+      : 'Login with Password';
+
+  const toggleOtpLogin = () => {
+    setUseOtpLogin((prev) => !prev);
+    setError('');
+  };
+
+  const handlePasswordLogin = async () => {
+    if (useOtpLogin || !canPasswordLogin || loggingIn || sending) return;
+    setLoggingIn(true);
+    setError('');
+    try {
+      await loginWithPassword(`+91${digits}`, passwordValue);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not log in. Try again.';
+      setError(
+        message.includes('No account found')
+          ? 'This phone number is not registered. Please register first.'
+          : message
+      );
+    } finally {
+      setLoggingIn(false);
+    }
+  };
 
   const handleSend = async () => {
-    if (!isValid || sending) return;
+    if (!isValid || sending || loggingIn) return;
     setSending(true);
     setError('');
     try {
@@ -43,6 +80,14 @@ export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
     } finally {
       setSending(false);
     }
+  };
+
+  const handlePrimaryLogin = () => {
+    if (useOtpLogin) {
+      handleSend();
+      return;
+    }
+    handlePasswordLogin();
   };
 
   return (
@@ -106,9 +151,63 @@ export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
                 autoComplete="tel"
                 maxLength={10}
                 autoFocus
+                returnKeyType={useOtpLogin ? 'go' : 'next'}
+                onSubmitEditing={() => {
+                  if (useOtpLogin) {
+                    handleSend();
+                    return;
+                  }
+                  passwordInputRef.current?.focus();
+                }}
                 style={styles.numberInput}
               />
             </Pressable>
+
+            {useOtpLogin ? (
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: true }}
+                accessibilityLabel="Login with OTP"
+                onPress={toggleOtpLogin}
+                style={({ pressed }) => [styles.otpModeRow, pressed && styles.pressed]}
+              >
+                <MaterialCommunityIcons name="cellphone-message" size={20} color={theme.colors.primary} style={styles.passwordIcon} />
+                <View style={[styles.otpCheckbox, styles.otpCheckboxChecked]}>
+                  <MaterialCommunityIcons name="check" size={15} color={theme.colors.textInverse} />
+                </View>
+                <Text style={[styles.otpCheckText, styles.otpCheckTextActive]}>OTP</Text>
+              </Pressable>
+            ) : (
+              <View style={[styles.inputRow, styles.passwordRow]}>
+                <MaterialCommunityIcons name="lock-outline" size={20} color={theme.colors.textMuted} style={styles.passwordIcon} />
+                <TextInput
+                  ref={passwordInputRef}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Password"
+                  placeholderTextColor="#B8B2AA"
+                  secureTextEntry
+                  textContentType="password"
+                  autoComplete="password"
+                  autoCapitalize="none"
+                  returnKeyType="go"
+                  onSubmitEditing={handlePasswordLogin}
+                  style={styles.passwordInput}
+                />
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: false }}
+                  accessibilityLabel="Login with OTP"
+                  onPress={toggleOtpLogin}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.otpCheckWrap, pressed && styles.pressed]}
+                >
+                  <View style={styles.otpCheckbox} />
+                  <Text style={styles.otpCheckText}>OTP</Text>
+                </Pressable>
+              </View>
+            )}
+
             {!!error && <Text style={styles.errorText}>{error}</Text>}
             {error.includes('not registered') ? (
               <Pressable
@@ -122,13 +221,14 @@ export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
 
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={sendOtpLabel}
-              onPress={handleSend}
-              disabled={!isValid || sending}
+              accessibilityLabel={useOtpLogin ? 'Login with OTP' : 'Login with password'}
+              onPress={handlePrimaryLogin}
+              disabled={!canPrimaryLogin || sending || loggingIn}
               style={({ pressed }) => [
                 styles.otpButton,
-                (!isValid || sending) && styles.disabled,
-                pressed && isValid && !sending && styles.pressed,
+                styles.passwordLoginButton,
+                (!canPrimaryLogin || sending || loggingIn) && styles.disabled,
+                pressed && canPrimaryLogin && !sending && !loggingIn && styles.pressed,
               ]}
             >
               <LinearGradient
@@ -137,7 +237,7 @@ export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
                 end={{ x: 1, y: 0 }}
                 style={styles.otpGradient}
               >
-                <Text style={styles.otpButtonText}>{sending ? 'Sending...' : sendOtpLabel}</Text>
+                <Text style={styles.otpButtonText}>{primaryLabel}</Text>
               </LinearGradient>
             </Pressable>
 
@@ -335,6 +435,68 @@ const styles = StyleSheet.create({
     ...theme.typography.tiny,
     color: theme.colors.text,
   },
+  passwordRow: {
+    marginTop: theme.spacing.md,
+  },
+  passwordIcon: {
+    marginLeft: theme.spacing.md,
+    marginRight: theme.spacing.xs,
+  },
+  passwordInput: {
+    flex: 1,
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 0,
+    ...theme.typography.tiny,
+    color: theme.colors.text,
+  },
+  otpModeRow: {
+    width: '100%',
+    minHeight: 56,
+    borderRadius: theme.radius.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: theme.spacing.md,
+    shadowColor: theme.colors.shadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    elevation: 2,
+  },
+  otpCheckWrap: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderLeftWidth: 1,
+    borderLeftColor: '#F0EBE5',
+    paddingHorizontal: 12,
+  },
+  otpCheckbox: {
+    width: 21,
+    height: 21,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  otpCheckboxChecked: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  otpCheckText: {
+    ...theme.typography.tiny,
+    color: theme.colors.textSecondary,
+    fontWeight: '800',
+  },
+  otpCheckTextActive: {
+    color: theme.colors.primary,
+  },
   errorText: {
     ...theme.typography.caption,
     color: theme.colors.danger,
@@ -366,6 +528,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 14,
     elevation: 3,
+  },
+  passwordLoginButton: {
+    marginTop: 22,
   },
   otpGradient: {
     flex: 1,

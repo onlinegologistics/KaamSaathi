@@ -5,12 +5,14 @@ import {
   Briefcase,
   Tags,
   Flag,
+  ShieldCheck,
   Settings,
   Receipt,
   LineChart,
   Wallet,
   Users,
   ChevronDown,
+  IndianRupee,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -21,6 +23,8 @@ const navSections = [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
       { to: '/jobs', label: 'Job Moderation', icon: Briefcase },
       { to: '/categories', label: 'Categories', icon: Tags },
+      { to: '/pricing', label: 'Minimum Pricing', icon: IndianRupee },
+      { to: '/approvals', label: 'Approvals', icon: ShieldCheck },
       { to: '/reports', label: 'Reported Content', icon: Flag },
       {
         label: 'App Settings',

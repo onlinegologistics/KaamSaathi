@@ -1,5 +1,7 @@
 import { NavigatorScreenParams } from '@react-navigation/native';
 
+export type ProfileEditSection = 'profile' | 'kyc' | 'wallet';
+
 export type AuthStackParamList = {
   Onboarding: undefined;
   Splash: undefined;
@@ -8,17 +10,21 @@ export type AuthStackParamList = {
   ProfileSetup: undefined;
 };
 
+export type LiveLocationParams = { jobId: string; otherUserName: string };
+
 export type HomeStackParamList = {
   HomeFeed: undefined;
   JobDetail: { jobId: string };
   Search: undefined;
   ChatThread: ChatThreadParams;
+  LiveLocation: LiveLocationParams;
 };
 
 export type SearchStackParamList = {
   SearchMain: undefined;
   JobDetail: { jobId: string };
   ChatThread: ChatThreadParams;
+  LiveLocation: LiveLocationParams;
 };
 
 export type PostStackParamList = {
@@ -36,7 +42,9 @@ export type ProfileStackParamList = {
   Settings: undefined;
   HelpSupport: undefined;
   AiAssistant: undefined;
-  EditProfile: undefined;
+  EditProfile: { section?: ProfileEditSection } | undefined;
+  Wallet: undefined;
+  LiveLocation: LiveLocationParams;
 };
 
 export type ChatThreadParams = {

@@ -15,6 +15,8 @@ const listUsers = asyncHandler(async (req, res) => {
   }
   if (req.query.isBlocked !== undefined) filter.isBlocked = req.query.isBlocked;
   if (req.query.isVerified !== undefined) filter['aadhaarVerification.isVerified'] = req.query.isVerified;
+  if (req.query.kycStatus) filter['kyc.status'] = req.query.kycStatus;
+  if (req.query.walletStatus) filter['wallet.status'] = req.query.walletStatus;
   if (req.query.minRating !== undefined) filter.ratingAverage = { $gte: Number(req.query.minRating) };
   if (req.query.location) filter['location.address'] = new RegExp(req.query.location, 'i');
 
@@ -61,4 +63,82 @@ const verifyUser = asyncHandler(async (req, res) => {
   res.json({ success: true, user });
 });
 
-module.exports = { listUsers, getUserDetail, blockUser, unblockUser, verifyUser };
+const approveKyc = asyncHandler(async (req, res) => {
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    {
+      $set: {
+        'kyc.status': 'verified',
+        'kyc.verifiedAt': new Date(),
+        'kyc.rejectionReason': '',
+      },
+    },
+    { new: true }
+  );
+  if (!user) throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+  res.json({ success: true, user });
+});
+
+const rejectKyc = asyncHandler(async (req, res) => {
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    {
+      $set: {
+        'kyc.status': 'rejected',
+        'kyc.rejectionReason': req.body.reason || 'Rejected by admin',
+      },
+      $unset: {
+        'kyc.verifiedAt': '',
+      },
+    },
+    { new: true }
+  );
+  if (!user) throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+  res.json({ success: true, user });
+});
+
+const approveWallet = asyncHandler(async (req, res) => {
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    {
+      $set: {
+        'wallet.status': 'verified',
+        'wallet.verifiedAt': new Date(),
+        'wallet.rejectionReason': '',
+      },
+    },
+    { new: true }
+  );
+  if (!user) throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+  res.json({ success: true, user });
+});
+
+const rejectWallet = asyncHandler(async (req, res) => {
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    {
+      $set: {
+        'wallet.status': 'rejected',
+        'wallet.rejectionReason': req.body.reason || 'Rejected by admin',
+      },
+      $unset: {
+        'wallet.verifiedAt': '',
+      },
+    },
+    { new: true }
+  );
+  if (!user) throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+  res.json({ success: true, user });
+});
+
+module.exports = {
+  listUsers,
+  getUserDetail,
+  blockUser,
+  unblockUser,
+  verifyUser,
+  approveKyc,
+  rejectKyc,
+  approveWallet,
+  rejectWallet,
+};

@@ -1,5 +1,6 @@
 const express = require('express');
 const jobController = require('../controllers/jobController');
+const pricingController = require('../controllers/pricingController');
 const validate = require('../middleware/validate');
 const { requireAuth } = require('../middleware/auth');
 const {
@@ -12,10 +13,14 @@ const {
   verifyWorkerOtpSchema,
   rateJobSchema,
 } = require('../validators/job.validator');
+const { priceSuggestionSchema } = require('../validators/pricing.validator');
 
 const router = express.Router();
 
 router.use(requireAuth);
+
+// Must come before /:id so "price-suggestion" isn't swallowed as a job id.
+router.post('/price-suggestion', validate(priceSuggestionSchema), pricingController.getPriceSuggestion);
 
 router.route('/')
   .get(validate(listJobsSchema), jobController.listJobs)
@@ -26,6 +31,8 @@ router.route('/:id')
   .put(validate(updateJobSchema), jobController.updateJob)
   .delete(validate(jobIdSchema), jobController.deleteJob);
 
+router.get('/:id/call-info', validate(jobIdSchema), jobController.getCallInfo);
+router.get('/:id/location', validate(jobIdSchema), jobController.getJobLocations);
 router.get('/:id/chat', validate(jobChatSchema), jobController.getJobChat);
 router.post('/:id/apply', validate(jobIdSchema), jobController.applyToJob);
 router.post('/:id/application/cancel', validate(jobIdSchema), jobController.cancelAcceptedApplication);

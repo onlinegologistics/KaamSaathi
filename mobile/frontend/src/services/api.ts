@@ -1,27 +1,48 @@
 import Constants from 'expo-constants';
+import type {
+  AccountType,
+  CategoryMeta,
+  EmployerKind,
+  Gender,
+  JobCategory,
+  KycProfile,
+  WalletProfile,
+  WalletTransaction,
+} from '../types';
 
 const API_PORT = 5000;
 
-// Last resort only: used for production builds, and for tunnels (which proxy
-// Metro but not this server). Keep it pointing at wherever the API really runs.
+// Last resort only: used for production builds. Local dev should use the Expo host.
 const FALLBACK_API_BASE_URL = 'https://app.smartdial.online';
 
-// Hosts that serve the JS bundle but cannot reach the API server.
 const isTunnelHost = (host: string) =>
   host.endsWith('.exp.direct') || host.endsWith('.ngrok.io') || host.endsWith('.loca.lt');
 
-/**
- * Reuses whatever host Expo loaded this bundle from, swapping in the API port.
- *
- * That keeps the API pointed at the dev machine automatically: a new DHCP lease,
- * a different Wi-Fi, or the Android emulator (which sees the host as 10.0.2.2)
- * all resolve correctly with no code edit.
- */
+const parseHostUri = (hostUri: string) => {
+  const uri = hostUri.includes('://') ? hostUri : `http://${hostUri}`;
+  try {
+    const parsed = new URL(uri);
+    return parsed.hostname;
+  } catch {
+    return undefined;
+  }
+};
+
 const deriveApiBaseUrl = (): string => {
-  const hostUri = Constants.expoConfig?.hostUri;
-  const host = hostUri?.split(':')[0];
-  if (!host || isTunnelHost(host)) return FALLBACK_API_BASE_URL;
-  return `http://${host}:${API_PORT}`;
+  const explicitApiBaseUrl = (Constants.expoConfig as any)?.extra?.apiBaseUrl;
+  if (explicitApiBaseUrl) return explicitApiBaseUrl;
+
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    (Constants.manifest as any)?.debuggerHost ||
+    (Constants as any).manifest2?.hostUri;
+
+  const host = hostUri ? parseHostUri(hostUri) : undefined;
+  if (host && !isTunnelHost(host)) {
+    return `http://${host}:${API_PORT}`;
+  }
+
+  return FALLBACK_API_BASE_URL;
 };
 
 export const API_BASE_URL = deriveApiBaseUrl();
@@ -86,9 +107,28 @@ export interface BackendUser {
   phone: string;
   photoUrl?: string;
   email?: string;
+  accountType?: AccountType;
   dateOfBirth?: string;
+  gender?: Gender;
+  languages?: string[];
   education?: string;
   currentAddress?: string;
+  workerProfile?: {
+    skills?: string[];
+    experienceYears?: number;
+    preferredWorkCategories?: JobCategory[];
+    workRadiusKm?: number;
+  };
+  employerProfile?: {
+    kind?: EmployerKind;
+    companyName?: string;
+    gstNumber?: string;
+    officeAddress?: string;
+    companyLogoUrl?: string;
+    companyVerificationRequested?: boolean;
+  };
+  kyc?: KycProfile;
+  wallet?: WalletProfile;
   location?: {
     type: 'Point';
     coordinates?: [number, number];
@@ -106,6 +146,73 @@ export interface TokenPair {
   refreshToken: string;
 }
 
+export interface BackendCategory {
+  _id: string;
+  key: string;
+  name: string;
+  groupKey: string;
+  groupName: string;
+  icon: string;
+  color: string;
+  kycDocumentLabel?: string;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export const toCategoryMeta = (category: BackendCategory): CategoryMeta => ({
+  key: category.key,
+  label: category.name,
+  groupKey: category.groupKey,
+  groupName: category.groupName,
+  icon: category.icon,
+  color: category.color,
+  kycDocumentLabel: category.kycDocumentLabel,
+  sortOrder: category.sortOrder,
+  isActive: category.isActive,
+});
+
+export const listCategories = () =>
+  request<{ success: true; categories: BackendCategory[] }>('/categories');
+
+export const listAdminCategories = (accessToken: string, includeInactive = true) =>
+  request<{ success: true; categories: BackendCategory[] }>('/admin/categories', {
+    accessToken,
+    query: { includeInactive },
+  });
+
+export const createAdminCategory = (accessToken: string, category: Omit<CategoryMeta, 'labelKey'>) =>
+  request<{ success: true; category: BackendCategory }>('/admin/categories', {
+    method: 'POST',
+    accessToken,
+    body: {
+      key: category.key,
+      name: category.label,
+      groupKey: category.groupKey,
+      groupName: category.groupName,
+      icon: category.icon,
+      color: category.color,
+      kycDocumentLabel: category.kycDocumentLabel,
+      sortOrder: category.sortOrder,
+      isActive: category.isActive,
+    },
+  });
+
+export const updateAdminCategory = (accessToken: string, key: string, category: Partial<Omit<CategoryMeta, 'key' | 'labelKey'>>) =>
+  request<{ success: true; category: BackendCategory }>(`/admin/categories/${key}`, {
+    method: 'PUT',
+    accessToken,
+    body: {
+      ...(category.label !== undefined ? { name: category.label } : {}),
+      ...(category.groupKey !== undefined ? { groupKey: category.groupKey } : {}),
+      ...(category.groupName !== undefined ? { groupName: category.groupName } : {}),
+      ...(category.icon !== undefined ? { icon: category.icon } : {}),
+      ...(category.color !== undefined ? { color: category.color } : {}),
+      ...(category.kycDocumentLabel !== undefined ? { kycDocumentLabel: category.kycDocumentLabel } : {}),
+      ...(category.sortOrder !== undefined ? { sortOrder: category.sortOrder } : {}),
+      ...(category.isActive !== undefined ? { isActive: category.isActive } : {}),
+    },
+  });
+
 export const sendOtp = (phone: string, intent: 'login' | 'register' = 'login') =>
   request<{ success: true; otp: string; message: string }>('/auth/send-otp', {
     method: 'POST',
@@ -118,15 +225,59 @@ export const verifyOtp = (phone: string, otp: string, intent: 'login' | 'registe
     body: { phone, otp, intent },
   });
 
+export const loginWithPassword = (phone: string, password: string) =>
+  request<{ success: true; user: BackendUser; isNewUser: false } & TokenPair>('/auth/login', {
+    method: 'POST',
+    body: { phone, password },
+  });
+
+export const getProfile = (accessToken: string) =>
+  request<{ success: true; user: BackendUser }>('/users/profile', {
+    accessToken,
+  });
+
 export const updateProfile = (
   accessToken: string,
   profile: {
     name: string;
     photoUrl?: string;
     email?: string;
+    password?: string;
+    accountType?: AccountType;
+    termsAccepted?: boolean;
+    termsAcceptedAt?: string;
     dateOfBirth?: string;
+    gender?: Gender;
+    languages?: string[];
     education?: string;
     currentAddress?: string;
+    workerProfile?: {
+      skills?: string[];
+      experienceYears?: number;
+      preferredWorkCategories?: JobCategory[];
+      workRadiusKm?: number;
+    };
+    employerProfile?: {
+      kind?: EmployerKind;
+      companyName?: string;
+      gstNumber?: string;
+      officeAddress?: string;
+      companyLogoUrl?: string;
+      companyVerificationRequested?: boolean;
+    };
+    kyc?: {
+      aadhaarCardUrl?: string;
+      selfieUrl?: string;
+      drivingLicenseUrl?: string;
+      categoryDocuments?: KycProfile['categoryDocuments'];
+    };
+    wallet?: {
+      upiId?: string;
+      bankAccountNumber?: string;
+      bankAccountHolderName?: string;
+      ifscCode?: string;
+      panNumber?: string;
+    };
     location?: { latitude: number; longitude: number; address: string };
   }
 ) =>
@@ -137,9 +288,19 @@ export const updateProfile = (
       name: profile.name,
       ...(profile.photoUrl ? { photoUrl: profile.photoUrl } : {}),
       ...(profile.email ? { email: profile.email } : {}),
+      ...(profile.password ? { password: profile.password } : {}),
+      ...(profile.accountType ? { accountType: profile.accountType } : {}),
+      ...(profile.termsAccepted !== undefined ? { termsAccepted: profile.termsAccepted } : {}),
+      ...(profile.termsAcceptedAt ? { termsAcceptedAt: profile.termsAcceptedAt } : {}),
       ...(profile.dateOfBirth ? { dateOfBirth: profile.dateOfBirth } : {}),
+      ...(profile.gender ? { gender: profile.gender } : {}),
+      ...(profile.languages ? { languages: profile.languages } : {}),
       ...(profile.education ? { education: profile.education } : {}),
       ...(profile.currentAddress ? { currentAddress: profile.currentAddress } : {}),
+      ...(profile.workerProfile ? { workerProfile: profile.workerProfile } : {}),
+      ...(profile.employerProfile ? { employerProfile: profile.employerProfile } : {}),
+      ...(profile.kyc ? { kyc: profile.kyc } : {}),
+      ...(profile.wallet ? { wallet: profile.wallet } : {}),
       ...(profile.location
         ? {
             location: {
@@ -150,6 +311,28 @@ export const updateProfile = (
           }
         : {}),
     },
+  });
+
+// ---- Wallet ----
+
+export const addWalletMoney = (accessToken: string, amount: number) =>
+  request<{ success: true; user: BackendUser; transaction: WalletTransaction }>('/users/wallet/add-money', {
+    method: 'POST',
+    accessToken,
+    body: { amount },
+  });
+
+export const withdrawWalletMoney = (accessToken: string, amount: number) =>
+  request<{ success: true; user: BackendUser; transaction: WalletTransaction }>('/users/wallet/withdraw', {
+    method: 'POST',
+    accessToken,
+    body: { amount },
+  });
+
+export const listWalletTransactions = (accessToken: string, query: { page?: number; limit?: number } = {}) =>
+  request<{ success: true; data: WalletTransaction[]; pagination: PaginationMeta }>('/users/wallet/transactions', {
+    accessToken,
+    query,
   });
 
 // ---- Jobs ----
@@ -165,6 +348,7 @@ export interface BackendJob {
   _id: string;
   postedBy: BackendUser;
   category: string;
+  categoryGroup?: string;
   title: string;
   description: string;
   location: { type: 'Point'; coordinates: [number, number]; address: string };
@@ -180,6 +364,8 @@ export interface BackendJob {
     verifiedBy?: string;
   };
   scheduledFor: string;
+  endAt?: string;
+  suggestedMinimumPrice?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -196,11 +382,29 @@ export interface CreateJobPayload {
   title: string;
   description: string;
   location: { lat: number; lng: number; address: string };
+  city?: string;
+  area?: string;
   duration: number;
   payAmount: number;
   peopleNeeded: number;
   scheduledFor: string;
 }
+
+export interface PriceSuggestion {
+  suggestedMinimum: number;
+  currency: string;
+  source: string;
+}
+
+export const getPriceSuggestion = (
+  accessToken: string,
+  query: { city?: string; area?: string; category?: string; durationMinutes: number }
+) =>
+  request<{ success: true; data: PriceSuggestion }>('/jobs/price-suggestion', {
+    method: 'POST',
+    accessToken,
+    body: query,
+  });
 
 export const createJob = (accessToken: string, payload: CreateJobPayload) =>
   request<{ success: true; job: BackendJob }>('/jobs', {
@@ -211,6 +415,7 @@ export const createJob = (accessToken: string, payload: CreateJobPayload) =>
 
 export interface ListJobsQuery {
   category?: string;
+  categoryGroup?: string;
   status?: string;
   mine?: boolean;
   applied?: boolean;
@@ -256,6 +461,26 @@ export const applyToJob = (accessToken: string, jobId: string) =>
 export const cancelAcceptedApplication = (accessToken: string, jobId: string) =>
   request<{ success: true; job: BackendJob }>(`/jobs/${jobId}/application/cancel`, {
     method: 'POST',
+    accessToken,
+  });
+
+export const getCallInfo = (accessToken: string, jobId: string) =>
+  request<{ success: true; name: string; phone: string }>(`/jobs/${jobId}/call-info`, {
+    accessToken,
+  });
+
+export interface JobLocationShare {
+  userId: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  heading?: number;
+  speed?: number;
+  updatedAt: string;
+}
+
+export const getJobLocations = (accessToken: string, jobId: string) =>
+  request<{ success: true; data: JobLocationShare[] }>(`/jobs/${jobId}/location`, {
     accessToken,
   });
 
@@ -394,3 +619,39 @@ export const getPlaceLocation = (accessToken: string, placeId: string, sessionTo
       query: sessionToken ? { sessionToken } : undefined,
     }
   );
+
+// ---- Reports ----
+
+export const REPORT_REASONS = [
+  'Spam / Fake job',
+  'Fraud / Scam',
+  'Abusive behavior',
+  'Unsafe behavior',
+  'Incorrect information',
+  'Payment issue',
+  'Harassment',
+  'Other',
+] as const;
+
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
+export interface BackendReport {
+  _id: string;
+  targetType: 'job' | 'user';
+  targetId: string;
+  reporterId: string;
+  reason: string;
+  description: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+}
+
+export const submitReport = (
+  accessToken: string,
+  payload: { targetType: 'job' | 'user'; targetId: string; reason: ReportReason; description?: string }
+) =>
+  request<{ success: true; report: BackendReport }>('/reports', {
+    method: 'POST',
+    accessToken,
+    body: payload,
+  });

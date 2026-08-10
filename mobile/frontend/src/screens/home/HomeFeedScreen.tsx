@@ -12,10 +12,10 @@ import { JobCard } from '../../components/JobCard';
 import { AnnouncementModal } from '../../components/AnnouncementModal';
 import { LocationPickerModal } from '../../components/LocationPickerModal';
 import { WelcomeModal } from '../../components/WelcomeModal';
-import { categories } from '../../data/categories';
 import { listJobs } from '../../services/api';
 import { toJobViewModel } from '../../utils/jobAdapter';
-import { Job, JobCategory } from '../../types';
+import { getProfileCompletionTasks } from '../../utils/profileCompletion';
+import { Job } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { HomeStackParamList, MainTabParamList } from '../../navigation/types';
 
@@ -64,8 +64,10 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
     welcome,
     dismissWelcome,
     logout,
+    categories,
+    categoryGroups,
   } = useApp();
-  const [category, setCategory] = useState<JobCategory | 'all'>('all');
+  const [categoryGroup, setCategoryGroup] = useState<string | 'all'>('all');
   const [page, setPage] = useState(1);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [popularJobs, setPopularJobs] = useState<Job[]>([]);
@@ -114,7 +116,7 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
       setLoading(true);
       try {
         const res = await listJobs(accessToken, {
-          category: category !== 'all' ? category : undefined,
+          categoryGroup: categoryGroup !== 'all' ? categoryGroup : undefined,
           status: 'open',
           page: targetPage,
           limit: PAGE_SIZE,
@@ -130,13 +132,13 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
         setRefreshing(false);
       }
     },
-    [accessToken, category, userLocation]
+    [accessToken, categoryGroup, userLocation]
   );
 
   useEffect(() => {
     fetchJobs(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, category, userLocation]);
+  }, [accessToken, categoryGroup, userLocation]);
 
   // Independent of the category filter above — this is what "Popular Services"
   // ranks by, so switching a filter on the main feed can't collapse it to one category.
@@ -167,12 +169,39 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
         stats.set(job.category, { count: 1, minPay: job.pay });
       }
     });
-    return categories
-      .map((cat) => ({ ...cat, ...stats.get(cat.key) }))
-      .filter((cat): cat is typeof cat & { count: number; minPay: number } => !!cat.count)
+    const grouped = categories.reduce<Record<string, { key: string; name: string; count: number; minPay: number; color: string; icon: string }>>(
+        (acc, cat) => {
+          if (!cat.groupKey || !cat.groupName) return acc;
+          const stat = stats.get(cat.key);
+          if (!stat) return acc;
+          const existing = acc[cat.groupKey];
+          if (existing) {
+            existing.count += stat.count;
+            existing.minPay = Math.min(existing.minPay, stat.minPay);
+          } else {
+            acc[cat.groupKey] = {
+              key: cat.groupKey,
+              name: cat.groupName,
+              count: stat.count,
+              minPay: stat.minPay,
+              color: cat.color,
+              icon: cat.icon,
+            };
+          }
+          return acc;
+        },
+        {}
+      );
+    return Object.values(grouped)
       .sort((a, b) => b.count - a.count)
       .slice(0, 8);
-  }, [popularJobs]);
+  }, [categories, popularJobs]);
+
+  const profileTasks = useMemo(() => getProfileCompletionTasks(currentUser), [currentUser]);
+  const incompleteProfileTasks = profileTasks.filter((task) => !task.complete);
+  const openProfileSetup = useCallback(() => {
+    navigation.navigate('ProfileTab', { screen: 'ProfileMain' });
+  }, [navigation]);
 
   const handleLoadMore = useCallback(() => {
     if (hasMore && !loading) fetchJobs(page + 1);
@@ -310,41 +339,35 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
               </View>
             </LinearGradient>
 
-            <View style={styles.categoryGrid}>
-              {categories.map((cat) => (
-                <Pressable
-                  key={cat.key}
-                  accessibilityRole="button"
-                  accessibilityLabel={t(cat.labelKey)}
-                  onPress={() => setCategory((prev) => (prev === cat.key ? 'all' : cat.key))}
-                  style={styles.categoryItem}
-                >
-                  <View style={[styles.categoryTile, category === cat.key && styles.categoryTileActive]}>
-                    <MaterialCommunityIcons
-                      name={cat.icon as keyof typeof MaterialCommunityIcons.glyphMap}
-                      size={26}
-                      color={cat.color}
-                    />
-                  </View>
-                  <Text style={styles.categoryLabel} numberOfLines={1}>
-                    {t(cat.labelKey)}
-                  </Text>
-                </Pressable>
-              ))}
+            {incompleteProfileTasks.length > 0 ? (
+              <ProfileIncompleteNotice tasks={incompleteProfileTasks} onPress={openProfileSetup} />
+            ) : null}
 
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('more')}
-                onPress={() => navigation.navigate('Search')}
-                style={styles.categoryItem}
-              >
-                <View style={styles.categoryTile}>
-                  <MaterialCommunityIcons name="dots-horizontal" size={26} color={theme.colors.textMuted} />
-                </View>
-                <Text style={styles.categoryLabel} numberOfLines={1}>
-                  {t('more')}
-                </Text>
-              </Pressable>
+            <View style={styles.categoryGrid}>
+              {categoryGroups.map((group) => {
+                const first = categories.find((cat) => cat.groupKey === group.key);
+                const selected = categoryGroup === group.key;
+                return (
+                  <Pressable
+                    key={group.key}
+                    accessibilityRole="button"
+                    accessibilityLabel={group.name}
+                    onPress={() => setCategoryGroup((prev) => (prev === group.key ? 'all' : group.key))}
+                    style={styles.categoryItem}
+                  >
+                    <View style={[styles.categoryTile, selected && styles.categoryTileActive]}>
+                      <MaterialCommunityIcons
+                        name={(first?.icon ?? 'briefcase-outline') as keyof typeof MaterialCommunityIcons.glyphMap}
+                        size={26}
+                        color={first?.color ?? theme.colors.primary}
+                      />
+                    </View>
+                    <Text style={styles.categoryLabel} numberOfLines={2}>
+                      {group.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
 
             <View style={styles.sectionHeader}>
@@ -366,7 +389,7 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
                     meta={item}
                     count={item.count}
                     minPay={item.minPay}
-                    onPress={() => setCategory((prev) => (prev === item.key ? 'all' : item.key))}
+                    onPress={() => setCategoryGroup((prev) => (prev === item.key ? 'all' : item.key))}
                   />
                 )}
               />
@@ -497,17 +520,21 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const ServiceCard: React.FC<{ meta: (typeof categories)[number]; count: number; minPay: number; onPress: () => void }> = ({
+const ServiceCard: React.FC<{
+  meta: { key: string; name: string; color: string; icon: string };
+  count: number;
+  minPay: number;
+  onPress: () => void;
+}> = ({
   meta,
   count,
   minPay,
   onPress,
 }) => {
-  const { t } = useApp();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={t(meta.labelKey)}
+      accessibilityLabel={meta.name}
       onPress={onPress}
       style={({ pressed }) => [styles.serviceCard, pressed && styles.pressed]}
     >
@@ -519,12 +546,35 @@ const ServiceCard: React.FC<{ meta: (typeof categories)[number]; count: number; 
         />
       </View>
       <Text style={styles.serviceTitle} numberOfLines={1}>
-        {t(meta.labelKey)}
+        {meta.name}
       </Text>
       <Text style={styles.servicePrice} numberOfLines={1}>{`${count} job${count === 1 ? '' : 's'} • From ₹${minPay}`}</Text>
     </Pressable>
   );
 };
+
+const ProfileIncompleteNotice: React.FC<{
+  tasks: ReturnType<typeof getProfileCompletionTasks>;
+  onPress: () => void;
+}> = ({ tasks, onPress }) => (
+  <Pressable
+    accessibilityRole="button"
+    accessibilityLabel="Incomplete setup"
+    onPress={onPress}
+    style={({ pressed }) => [styles.profileNotice, pressed && styles.pressed]}
+  >
+    <View style={styles.profileNoticeIcon}>
+      <MaterialCommunityIcons name="alert-circle-outline" size={20} color={theme.colors.primary} />
+    </View>
+    <View style={styles.profileNoticeCopy}>
+      <Text style={styles.profileNoticeTitle}>Setup incomplete</Text>
+      <Text style={styles.profileNoticeText} numberOfLines={1}>
+        {tasks.map((task) => task.title).join(', ')} complete nahi hai
+      </Text>
+    </View>
+    <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.textMuted} />
+  </Pressable>
+);
 
 const NotificationRow: React.FC<{ icon: keyof typeof MaterialCommunityIcons.glyphMap; title: string; body: string }> = ({
   icon,
@@ -688,6 +738,40 @@ const styles = StyleSheet.create({
     // lands centred in this narrow slot.
     marginLeft: -HERO_FOCUS_OFFSET,
     resizeMode: 'cover',
+  },
+  profileNotice: {
+    marginHorizontal: theme.spacing.lg,
+    marginTop: theme.spacing.sm,
+    minHeight: 54,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.primaryLight,
+    backgroundColor: theme.colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+  },
+  profileNoticeIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: theme.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileNoticeCopy: {
+    flex: 1,
+    marginLeft: theme.spacing.sm,
+  },
+  profileNoticeTitle: {
+    ...theme.typography.bodyBold,
+    color: theme.colors.text,
+  },
+  profileNoticeText: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+    marginTop: 2,
   },
   categoryGrid: {
     flexDirection: 'row',

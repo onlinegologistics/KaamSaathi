@@ -1,18 +1,26 @@
 import React, { createContext, useContext, useState, useMemo, useCallback, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { translations, Language, TranslationKey } from '../i18n/translations';
-import { User } from '../types';
+import { AccountType, CategoryMeta, EmployerProfile, Gender, KycProfile, User, WalletProfile, WorkerProfile } from '../types';
 import {
   BackendUser,
   TokenPair,
+  listCategories as apiListCategories,
+  loginWithPassword as apiLoginWithPassword,
   sendOtp as apiSendOtp,
+  toCategoryMeta,
   verifyOtp as apiVerifyOtp,
   updateProfile as apiUpdateProfile,
+  getProfile as apiGetProfile,
   applyToJob as apiApplyToJob,
   cancelAcceptedApplication as apiCancelAcceptedApplication,
+  addWalletMoney as apiAddWalletMoney,
+  withdrawWalletMoney as apiWithdrawWalletMoney,
 } from '../services/api';
+import { categories as fallbackCategories, categoryGroups as fallbackCategoryGroups } from '../data/categories';
 import { RemoteSettings, fetchRemoteSettings } from '../services/settings';
 import { connectSocket, disconnectSocket } from '../services/socket';
+import { isKycComplete, isProfileComplete } from '../utils/profileCompletion';
 
 export type UserMode = 'worker' | 'employer';
 
@@ -20,9 +28,19 @@ type ProfilePayload = {
   name: string;
   avatar?: string;
   email?: string;
+  password?: string;
+  accountType?: AccountType;
+  termsAccepted?: boolean;
+  termsAcceptedAt?: string;
   dateOfBirth?: string;
+  gender?: Gender;
+  languages?: string[];
   education?: string;
   currentAddress?: string;
+  workerProfile?: WorkerProfile;
+  employerProfile?: EmployerProfile;
+  kyc?: KycProfile;
+  wallet?: WalletProfile;
   location?: { latitude: number; longitude: number; label: string };
 };
 
@@ -32,9 +50,16 @@ const toUser = (backendUser: BackendUser): User => ({
   phone: backendUser.phone,
   avatar: backendUser.photoUrl || undefined,
   email: backendUser.email || undefined,
+  accountType: backendUser.accountType,
   dateOfBirth: backendUser.dateOfBirth || undefined,
+  gender: backendUser.gender,
+  languages: backendUser.languages,
   education: backendUser.education || undefined,
   currentAddress: backendUser.currentAddress || undefined,
+  workerProfile: backendUser.workerProfile,
+  employerProfile: backendUser.employerProfile,
+  kyc: backendUser.kyc,
+  wallet: backendUser.wallet,
   verified: backendUser.aadhaarVerification?.isVerified ?? false,
   rating: backendUser.ratingAverage,
   jobsPosted: backendUser.jobsPostedCount,
@@ -52,9 +77,19 @@ const toApiProfile = (profile: ProfilePayload) => ({
   name: profile.name,
   photoUrl: profile.avatar,
   email: profile.email,
+  password: profile.password,
+  accountType: profile.accountType,
+  termsAccepted: profile.termsAccepted,
+  termsAcceptedAt: profile.termsAcceptedAt,
   dateOfBirth: profile.dateOfBirth,
+  gender: profile.gender,
+  languages: profile.languages,
   education: profile.education,
   currentAddress: profile.currentAddress,
+  workerProfile: profile.workerProfile,
+  employerProfile: profile.employerProfile,
+  kyc: profile.kyc,
+  wallet: profile.wallet,
   location: profile.location
     ? { latitude: profile.location.latitude, longitude: profile.location.longitude, address: profile.location.label }
     : undefined,
@@ -74,10 +109,14 @@ interface AppContextValue {
   phoneNumber: string;
   accessToken: string | null;
 
+  loginWithPassword: (phone: string, password: string) => Promise<void>;
   requestOtp: (phone: string) => Promise<{ demoOtp: string }>;
   startRegistration: (phone: string, profile: ProfilePayload) => Promise<{ demoOtp: string }>;
   confirmOtp: (otp: string) => Promise<void>;
   updateProfile: (profile: ProfilePayload) => Promise<void>;
+  refreshProfile: () => Promise<void>;
+  addWalletMoney: (amount: number) => Promise<void>;
+  withdrawWalletMoney: (amount: number) => Promise<void>;
   logout: () => void;
 
   bookmarkedJobIds: string[];
@@ -88,6 +127,9 @@ interface AppContextValue {
   cancelAcceptedJob: (jobId: string) => Promise<void>;
 
   remoteSettings: RemoteSettings;
+  categories: CategoryMeta[];
+  categoryGroups: { key: string; name: string }[];
+  refreshCategories: () => Promise<void>;
   shouldShowAnnouncement: boolean;
   dismissAnnouncement: () => void;
 
@@ -110,12 +152,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [bookmarkedJobIds, setBookmarkedJobIds] = useState<string[]>([]);
   const [appliedJobIds, setAppliedJobIds] = useState<string[]>([]);
   const [remoteSettings, setRemoteSettings] = useState<RemoteSettings>({});
+  const [categories, setCategories] = useState<CategoryMeta[]>(fallbackCategories);
   const [announcementSeen, setAnnouncementSeen] = useState(true);
   const [welcome, setWelcome] = useState<{ name: string; isNewUser: boolean } | null>(null);
 
   useEffect(() => {
     fetchRemoteSettings().then(setRemoteSettings);
   }, []);
+
+  const refreshCategories = useCallback(async () => {
+    try {
+      const res = await apiListCategories();
+      const mapped = res.categories.map(toCategoryMeta);
+      setCategories(mapped.length ? mapped : fallbackCategories);
+    } catch {
+      setCategories(fallbackCategories);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshCategories();
+  }, [refreshCategories]);
 
   const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
@@ -126,6 +183,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     (key: TranslationKey) => translations[language][key] ?? translations.en[key] ?? key,
     [language]
   );
+
+  const loginWithPassword = useCallback(async (phone: string, password: string) => {
+    setPhoneNumber(phone);
+    setPendingRegistrationProfile(null);
+    const res = await apiLoginWithPassword(phone, password);
+    setTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
+    const user = toUser(res.user);
+    setCurrentUser(user);
+    try {
+      connectSocket(res.accessToken);
+    } catch {
+      // Chat is secondary; password login should not depend on socket connection.
+    }
+    setNeedsRegistration(false);
+    setIsAuthenticated(true);
+    setAnnouncementSeen(false);
+    setWelcome({ name: user.name, isNewUser: false });
+  }, []);
 
   const requestOtp = useCallback(async (phone: string) => {
     setPhoneNumber(phone);
@@ -181,6 +256,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [tokens]
   );
 
+  // KYC/wallet approvals happen server-side (an admin acting outside the app), so without
+  // this, currentUser silently goes stale until the user's next profile edit or re-login.
+  const refreshProfile = useCallback(async () => {
+    if (!tokens) return;
+    try {
+      const res = await apiGetProfile(tokens.accessToken);
+      setCurrentUser(toUser(res.user));
+    } catch {
+      // best-effort — keep whatever we already have rather than blocking the screen
+    }
+  }, [tokens]);
+
+  const addWalletMoney = useCallback(
+    async (amount: number) => {
+      if (!tokens) throw new Error('Not authenticated');
+      const res = await apiAddWalletMoney(tokens.accessToken, amount);
+      setCurrentUser(toUser(res.user));
+    },
+    [tokens]
+  );
+
+  const withdrawWalletMoney = useCallback(
+    async (amount: number) => {
+      if (!tokens) throw new Error('Not authenticated');
+      const res = await apiWithdrawWalletMoney(tokens.accessToken, amount);
+      setCurrentUser(toUser(res.user));
+    },
+    [tokens]
+  );
+
   const logout = useCallback(() => {
     disconnectSocket();
     setIsAuthenticated(false);
@@ -210,12 +315,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const applyToJob = useCallback(
     async (jobId: string) => {
       if (!tokens) throw new Error('Not authenticated');
+      if (!isProfileComplete(currentUser)) {
+        throw new Error('Please complete your profile before accepting or applying to jobs.');
+      }
+      if (!isKycComplete(currentUser)) {
+        if (currentUser?.kyc?.status === 'submitted') {
+          throw new Error('Your KYC is under admin review. Please wait up to 24 hours.');
+        }
+        if (currentUser?.kyc?.status === 'rejected') {
+          throw new Error('Your KYC was rejected. Please update and submit KYC again.');
+        }
+        throw new Error('Please complete KYC before accepting or applying to jobs.');
+      }
       const res = await apiApplyToJob(tokens.accessToken, jobId);
       const myId = currentUser?.id;
       const stillApplied = res.job.applicants.some((a) => a.userId._id === myId);
       setAppliedJobIds((prev) => (stillApplied && !prev.includes(jobId) ? [...prev, jobId] : prev));
     },
-    [tokens, currentUser?.id]
+    [tokens, currentUser]
   );
 
   const cancelAcceptedJob = useCallback(
@@ -230,6 +347,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Queued behind the welcome greeting so the two never stack on top of each other.
   const shouldShowAnnouncement =
     !announcementSeen && !welcome && !!remoteSettings['mobile.loginAnnouncement']?.enabled;
+  const categoryGroups = fallbackCategoryGroups;
 
   const value = useMemo(
     () => ({
@@ -243,10 +361,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currentUser,
       phoneNumber,
       accessToken: tokens?.accessToken ?? null,
+      loginWithPassword,
       requestOtp,
       startRegistration,
       confirmOtp,
       updateProfile,
+      refreshProfile,
+      addWalletMoney,
+      withdrawWalletMoney,
       logout,
       bookmarkedJobIds,
       toggleBookmark,
@@ -254,6 +376,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       applyToJob,
       cancelAcceptedJob,
       remoteSettings,
+      categories,
+      categoryGroups,
+      refreshCategories,
       shouldShowAnnouncement,
       dismissAnnouncement,
       welcome,
@@ -269,10 +394,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currentUser,
       phoneNumber,
       tokens,
+      loginWithPassword,
       requestOtp,
       startRegistration,
       confirmOtp,
       updateProfile,
+      refreshProfile,
+      addWalletMoney,
+      withdrawWalletMoney,
       logout,
       bookmarkedJobIds,
       toggleBookmark,
@@ -280,6 +409,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       applyToJob,
       cancelAcceptedJob,
       remoteSettings,
+      categories,
+      categoryGroups,
+      refreshCategories,
       shouldShowAnnouncement,
       dismissAnnouncement,
       welcome,

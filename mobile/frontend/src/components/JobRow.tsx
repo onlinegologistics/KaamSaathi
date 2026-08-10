@@ -1,10 +1,9 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { Alert, View, Text, Pressable, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { Job } from '../types';
 import { getCategoryMeta } from '../data/categories';
-import { timeAgo } from '../utils/time';
 import { useApp } from '../context/AppContext';
 
 interface JobRowProps {
@@ -15,9 +14,14 @@ interface JobRowProps {
 
 // Compact list row used by the job listings — icon tile, copy stack, apply pill.
 export const JobRow: React.FC<JobRowProps> = ({ job, onPress, onApply }) => {
-  const { t, appliedJobIds } = useApp();
+  const { t, appliedJobIds, categories } = useApp();
   const hasApplied = appliedJobIds.includes(job.id);
-  const meta = getCategoryMeta(job.category);
+  const meta = getCategoryMeta(job.category, categories);
+  const handleApply = () => {
+    Promise.resolve(onApply()).catch((error) => {
+      Alert.alert('Action needed', error instanceof Error ? error.message : 'Please try again.');
+    });
+  };
 
   const paySuffix = job.payType === 'day' ? t('perDay') : job.payType === 'hour' ? t('perHour') : '';
   const payLabel = `₹${job.pay}${paySuffix}`;
@@ -42,7 +46,7 @@ export const JobRow: React.FC<JobRowProps> = ({ job, onPress, onApply }) => {
           {job.title}
         </Text>
         <Text style={styles.meta} numberOfLines={1}>
-          {`${job.location.label} • ${timeAgo(job.postedAt)}`}
+          {`${job.location.label} • ${job.startTimeLabel} • ${job.durationLabel}`}
         </Text>
         <Text style={styles.pay}>{payLabel}</Text>
       </View>
@@ -50,7 +54,7 @@ export const JobRow: React.FC<JobRowProps> = ({ job, onPress, onApply }) => {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={hasApplied ? t('applied') : t('applyNow')}
-        onPress={onApply}
+        onPress={handleApply}
         disabled={hasApplied}
         style={({ pressed }) => [styles.applyBtn, hasApplied && styles.applyBtnDone, pressed && !hasApplied && styles.pressed]}
       >

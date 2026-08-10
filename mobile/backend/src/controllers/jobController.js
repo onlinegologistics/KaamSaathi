@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Job = require('../models/Job');
 const User = require('../models/User');
+const Category = require('../models/Category');
 const Rating = require('../models/Rating');
 const Transaction = require('../models/Transaction');
 const Chat = require('../models/Chat');
@@ -10,6 +11,8 @@ const env = require('../config/env');
 const { toGeoPoint } = require('../utils/location');
 const { getPagination, paginatedResponse } = require('../utils/pagination');
 const chatService = require('../services/chatService');
+const locationService = require('../services/locationService');
+const pricingService = require('../services/pricingService');
 
 const canManageJob = (user, job) => user.role === 'admin' || job.postedBy.toString() === user._id.toString();
 
@@ -20,6 +23,43 @@ const populateJob = (query) =>
     .populate('applicants.userId', 'name phone photoUrl ratingAverage');
 
 const generateWorkerOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+
+// duration is stored in hours; endAt is always derived server-side (never trust a client value —
+// the create/update Joi schemas don't even accept an `endAt` field, so req.body can't carry one).
+const HOUR_MS = 60 * 60 * 1000;
+const computeEndAt = (scheduledFor, durationHours) =>
+  new Date(new Date(scheduledFor).getTime() + durationHours * HOUR_MS);
+
+const hasText = (value) => typeof value === 'string' && value.trim().length > 0;
+
+const requireActiveCategory = async (categoryKey) => {
+  const category = await Category.findOne({ key: categoryKey, isActive: true });
+  if (!category) {
+    throw new ApiError(422, 'Selected category is not active', 'CATEGORY_NOT_ACTIVE');
+  }
+  return category;
+};
+
+const hasCategoryDocument = (user, category) =>
+  (user.kyc?.categoryDocuments ?? []).some(
+    (document) => document.category === category && hasText(document.documentUrl)
+  ) ||
+  (['delivery', 'driver'].includes(category) && hasText(user.kyc?.drivingLicenseUrl));
+
+const hasRequiredCategoryDocuments = (user) =>
+  (user.workerProfile?.preferredWorkCategories ?? []).every((category) => hasCategoryDocument(user, category));
+
+const hasSubmittedKyc = (user) =>
+  !!user &&
+  user.kyc?.status === 'verified' &&
+  hasText(user.kyc?.aadhaarCardUrl) &&
+  hasText(user.kyc?.selfieUrl) &&
+  hasRequiredCategoryDocuments(user);
+
+const requireKyc = (user, message) => {
+  if (hasSubmittedKyc(user)) return;
+  throw new ApiError(403, message, 'KYC_REQUIRED');
+};
 
 const sanitizeJobForUser = (job, userId) => {
   if (!job) return job;
@@ -37,10 +77,22 @@ const sanitizeJobForUser = (job, userId) => {
 };
 
 const createJob = asyncHandler(async (req, res) => {
+  requireKyc(req.user, 'Please complete KYC before posting a job.');
+  const { city, area, ...jobFields } = req.body;
+  const category = await requireActiveCategory(jobFields.category);
+  const { suggestedMinimum } = await pricingService.getSuggestedMinimumPrice({
+    city,
+    area,
+    category: jobFields.category,
+    durationMinutes: jobFields.duration * 60,
+  });
   const job = await Job.create({
-    ...req.body,
-    location: toGeoPoint(req.body.location),
+    ...jobFields,
+    categoryGroup: category.groupKey,
+    location: toGeoPoint(jobFields.location),
     postedBy: req.user._id,
+    endAt: computeEndAt(jobFields.scheduledFor, jobFields.duration),
+    suggestedMinimumPrice: suggestedMinimum,
   });
 
   await User.findByIdAndUpdate(req.user._id, { $inc: { jobsPostedCount: 1 } });
@@ -55,6 +107,7 @@ const listJobs = asyncHandler(async (req, res) => {
 
   if (req.query.status) filter.status = req.query.status;
   if (req.query.category) filter.category = req.query.category;
+  if (req.query.categoryGroup) filter.categoryGroup = req.query.categoryGroup;
   if (req.query.mine) filter.postedBy = req.user._id;
   if (req.query.applied) filter['applicants.userId'] = req.user._id;
   if (req.query.search) {
@@ -124,6 +177,53 @@ const getJob = asyncHandler(async (req, res) => {
   res.json({ success: true, job: sanitizeJobForUser(job, req.user._id) });
 });
 
+// Authorizes the Call feature server-side (never trust a frontend-only hide/show of the
+// button) and hands back only the one phone number the requester is actually allowed to
+// see — the broader job/applicant list endpoints already include raw phone numbers for
+// other pre-existing reasons, so this is deliberately the one place a phone number is
+// released under a real relationship check rather than blanket population.
+const getCallInfo = asyncHandler(async (req, res) => {
+  const job = await Job.findById(req.params.id)
+    .populate('postedBy', 'name phone')
+    .populate('acceptedApplicant', 'name phone');
+  if (!job) {
+    throw new ApiError(404, 'Job not found', 'JOB_NOT_FOUND');
+  }
+
+  const isPoster = job.postedBy._id.toString() === req.user._id.toString();
+  const isAcceptedWorker = job.acceptedApplicant?._id?.toString() === req.user._id.toString();
+
+  if (!job.acceptedApplicant || !(isPoster || isAcceptedWorker)) {
+    throw new ApiError(403, 'Calling is only available between the job poster and the accepted worker', 'CALL_NOT_AVAILABLE');
+  }
+
+  const otherUser = isPoster ? job.acceptedApplicant : job.postedBy;
+  if (!otherUser?.phone) {
+    throw new ApiError(422, 'This user has no phone number on file', 'CALL_PHONE_MISSING');
+  }
+
+  res.json({ success: true, name: otherUser.name || 'User', phone: otherUser.phone });
+});
+
+// Initial marker position for a freshly-opened LiveLocationScreen — the ongoing feed
+// comes over Socket.IO (location:update); this just avoids a blank map until the next tick.
+const getJobLocations = asyncHandler(async (req, res) => {
+  await locationService.assertCanShareLocation(req.params.id, req.user._id);
+  const shares = await locationService.getSharesForJob(req.params.id);
+  res.json({
+    success: true,
+    data: shares.map((share) => ({
+      userId: share.user.toString(),
+      latitude: share.latitude,
+      longitude: share.longitude,
+      accuracy: share.accuracy,
+      heading: share.heading,
+      speed: share.speed,
+      updatedAt: share.updatedAt,
+    })),
+  });
+});
+
 const updateJob = asyncHandler(async (req, res) => {
   const job = await Job.findById(req.params.id);
   if (!job) {
@@ -134,9 +234,16 @@ const updateJob = asyncHandler(async (req, res) => {
   }
 
   const payload = { ...req.body };
+  if (payload.category) {
+    const category = await requireActiveCategory(payload.category);
+    payload.categoryGroup = category.groupKey;
+  }
   if (req.body.location) payload.location = toGeoPoint(req.body.location);
 
   Object.assign(job, payload);
+  if (payload.scheduledFor !== undefined || payload.duration !== undefined) {
+    job.endAt = computeEndAt(job.scheduledFor, job.duration);
+  }
   await job.save();
   const populated = await populateJob(Job.findById(job._id));
   res.json({ success: true, job: sanitizeJobForUser(populated, req.user._id) });
@@ -156,6 +263,7 @@ const deleteJob = asyncHandler(async (req, res) => {
 });
 
 const applyToJob = asyncHandler(async (req, res) => {
+  requireKyc(req.user, 'Please complete KYC before accepting or applying to jobs.');
   const job = await Job.findById(req.params.id);
   if (!job) {
     throw new ApiError(404, 'Job not found', 'JOB_NOT_FOUND');
@@ -234,10 +342,17 @@ const setApplicantStatus = (status) =>
     if (!canManageJob(req.user, job)) {
       throw new ApiError(403, 'Only the job poster can manage applicants', 'APPLICANT_ACTION_FORBIDDEN');
     }
+    if (status === 'accepted') {
+      requireKyc(req.user, 'Please complete KYC before accepting a worker.');
+    }
 
     const applicant = job.applicants.find((item) => item.userId.toString() === req.params.userId);
     if (!applicant) {
       throw new ApiError(404, 'Applicant not found', 'APPLICANT_NOT_FOUND');
+    }
+    if (status === 'accepted') {
+      const applicantUser = await User.findById(applicant.userId).select('kyc workerProfile');
+      requireKyc(applicantUser, 'The selected worker must complete KYC before being accepted.');
     }
     if (status === 'accepted' && job.acceptedApplicant && job.acceptedApplicant.toString() !== applicant.userId.toString()) {
       throw new ApiError(409, 'A worker has already been accepted for this job', 'JOB_ALREADY_ACCEPTED');
@@ -436,6 +551,8 @@ module.exports = {
   createJob,
   listJobs,
   getJob,
+  getCallInfo,
+  getJobLocations,
   getJobChat,
   updateJob,
   deleteJob,

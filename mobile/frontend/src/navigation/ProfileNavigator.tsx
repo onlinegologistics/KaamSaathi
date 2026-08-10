@@ -11,6 +11,8 @@ import { SettingsScreen } from '../screens/profile/SettingsScreen';
 import { HelpSupportScreen } from '../screens/profile/HelpSupportScreen';
 import { AiAssistantScreen } from '../screens/profile/AiAssistantScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
+import { WalletScreen } from '../screens/profile/WalletScreen';
+import { LiveLocationScreen } from '../screens/job/LiveLocationScreen';
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
 
@@ -27,6 +29,8 @@ export const ProfileNavigator: React.FC = () => {
       <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
       <Stack.Screen name="AiAssistant" component={AiAssistantScreen} />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+      <Stack.Screen name="Wallet" component={WalletScreen} />
+      <Stack.Screen name="LiveLocation" component={LiveLocationScreen} />
     </Stack.Navigator>
   );
 };

@@ -1,9 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, Modal, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Modal, Pressable, ScrollView } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { IconButton } from './IconButton';
-import { categories } from '../data/categories';
 import { useApp } from '../context/AppContext';
 import { JobCategory } from '../types';
 
@@ -22,7 +21,7 @@ export const CategoryPickerSheet: React.FC<CategoryPickerSheetProps> = ({
   onClose,
   showAllOption = true,
 }) => {
-  const { t } = useApp();
+  const { t, categories, categoryGroups } = useApp();
 
   const handleSelect = (cat: JobCategory | 'all') => {
     onSelect(cat);
@@ -38,7 +37,7 @@ export const CategoryPickerSheet: React.FC<CategoryPickerSheetProps> = ({
           <IconButton name="close" accessibilityLabel={t('cancel')} onPress={onClose} color={theme.colors.textSecondary} />
         </View>
 
-        <View style={styles.grid}>
+        <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>
           {showAllOption && (
             <Pressable
               accessibilityRole="button"
@@ -57,28 +56,39 @@ export const CategoryPickerSheet: React.FC<CategoryPickerSheetProps> = ({
             </Pressable>
           )}
 
-          {categories.map((cat) => {
-            const selected = activeCategory === cat.key;
+          {categoryGroups.map((group) => {
+            const items = categories.filter((cat) => cat.groupKey === group.key);
+            if (!items.length) return null;
             return (
-              <Pressable
-                key={cat.key}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                onPress={() => handleSelect(cat.key)}
-                style={styles.option}
-              >
-                <View style={[styles.circle, selected && { backgroundColor: cat.color }]}>
-                  <MaterialCommunityIcons
-                    name={cat.icon as any}
-                    size={24}
-                    color={selected ? theme.colors.textInverse : theme.colors.textSecondary}
-                  />
+              <View key={group.key} style={styles.groupBlock}>
+                <Text style={styles.groupTitle}>{group.name}</Text>
+                <View style={styles.groupGrid}>
+                  {items.map((cat) => {
+                    const selected = activeCategory === cat.key;
+                    return (
+                      <Pressable
+                        key={cat.key}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        onPress={() => handleSelect(cat.key)}
+                        style={styles.option}
+                      >
+                        <View style={[styles.circle, selected && { backgroundColor: cat.color }]}>
+                          <MaterialCommunityIcons
+                            name={cat.icon as any}
+                            size={24}
+                            color={selected ? theme.colors.textInverse : theme.colors.textSecondary}
+                          />
+                        </View>
+                        <Text style={styles.label} numberOfLines={1}>{cat.label}</Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
-                <Text style={styles.label} numberOfLines={1}>{t(cat.labelKey)}</Text>
-              </Pressable>
+              </View>
             );
           })}
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -99,6 +109,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 26,
     paddingTop: theme.spacing.sm,
     paddingBottom: theme.spacing.xxl,
+    maxHeight: '82%',
   },
   header: {
     flexDirection: 'row',
@@ -112,9 +123,20 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
   },
   grid: {
+    paddingHorizontal: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
+  groupBlock: {
+    marginTop: theme.spacing.xs,
+  },
+  groupTitle: {
+    ...theme.typography.bodyBold,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.sm,
+  },
+  groupGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: theme.spacing.lg,
     gap: theme.spacing.md,
   },
   option: {

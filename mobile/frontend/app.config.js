@@ -17,6 +17,9 @@ module.exports = {
           'AnyWork uses your location to show nearby jobs and let you set your work location.',
         NSPhotoLibraryUsageDescription: 'AnyWork needs access to your photos so you can set a profile picture.',
         NSCameraUsageDescription: 'AnyWork needs camera access so you can take a profile picture.',
+        // Lets Linking.canOpenURL('tel:...') work correctly if it's ever used again —
+        // without this, it rejects on iOS even for a perfectly callable number.
+        LSApplicationQueriesSchemes: ['tel'],
       },
     },
     android: {
@@ -32,6 +35,11 @@ module.exports = {
     },
     web: {
       favicon: './assets/favicon.png',
+    },
+    updates: {
+      enabled: false,
+      checkAutomatically: 'NEVER',
+      fallbackToCacheTimeout: 0,
     },
     plugins: [
       [

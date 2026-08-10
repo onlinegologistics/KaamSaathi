@@ -14,6 +14,9 @@ const STATUS_STYLES: Record<string, string> = {
   rejected: 'border border-destructive/20 bg-destructive/10 text-destructive hover:bg-destructive/10',
   active: 'border border-[#2E9E5B]/20 bg-[#E3F6EA] text-[#1D6F3D] hover:bg-[#E3F6EA]',
   blocked: 'border border-destructive/20 bg-destructive/10 text-destructive hover:bg-destructive/10',
+  submitted: 'border border-[#F4A51C]/25 bg-[#FFF3CF] text-[#8A5200] hover:bg-[#FFF3CF]',
+  verified: 'border border-[#2E9E5B]/20 bg-[#E3F6EA] text-[#1D6F3D] hover:bg-[#E3F6EA]',
+  not_started: 'border border-border bg-muted text-muted-foreground hover:bg-muted',
 };
 
 export const StatusBadge = ({ status }: { status: string }) => (

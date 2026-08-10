@@ -31,3 +31,35 @@ export const useVerifyUser = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
   });
 };
+
+export const useApproveKyc = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: usersApi.approveKyc,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+};
+
+export const useRejectKyc = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: usersApi.rejectKyc,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+};
+
+export const useApproveWallet = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: usersApi.approveWallet,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+};
+
+export const useRejectWallet = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: usersApi.rejectWallet,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+};

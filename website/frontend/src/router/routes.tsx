@@ -5,6 +5,8 @@ import { LoginPage } from '@/pages/LoginPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { JobModerationPage } from '@/pages/admin/JobModerationPage';
 import { CategoriesPage } from '@/pages/admin/CategoriesPage';
+import { PricingPage } from '@/pages/admin/PricingPage';
+import { ApprovalsPage } from '@/pages/admin/ApprovalsPage';
 import { ReportsQueuePage } from '@/pages/admin/ReportsQueuePage';
 import { SettingsPage } from '@/pages/admin/SettingsPage';
 import { TransactionsPage } from '@/pages/accounting/TransactionsPage';
@@ -24,6 +26,8 @@ export const router = createBrowserRouter([
           { path: '/', element: <DashboardPage /> },
           { path: '/jobs', element: <JobModerationPage /> },
           { path: '/categories', element: <CategoriesPage /> },
+          { path: '/pricing', element: <PricingPage /> },
+          { path: '/approvals', element: <ApprovalsPage /> },
           { path: '/reports', element: <ReportsQueuePage /> },
           { path: '/settings', element: <SettingsPage /> },
           { path: '/settings/:tab', element: <SettingsPage /> },

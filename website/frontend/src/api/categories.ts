@@ -9,8 +9,10 @@ export const fetchCategories = async () => {
 export interface CreateCategoryPayload {
   name: string;
   key: string;
+  groupKey: 'labor' | 'skilled-workers' | 'professional' | 'home-services';
   icon?: string;
   color?: string;
+  kycDocumentLabel?: string;
   sortOrder?: number;
 }
 

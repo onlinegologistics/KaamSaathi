@@ -23,6 +23,13 @@ const reportSchema = new mongoose.Schema(
       trim: true,
       maxlength: 500,
     },
+    // Free-text detail, required by the app when reason === 'Other'.
+    description: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+      default: '',
+    },
     status: {
       type: String,
       enum: ['pending', 'approved', 'rejected'],

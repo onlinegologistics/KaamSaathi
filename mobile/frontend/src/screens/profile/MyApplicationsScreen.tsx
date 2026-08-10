@@ -12,6 +12,7 @@ import { listJobs, getJobChat, BackendJob } from '../../services/api';
 import { toJobViewModel } from '../../utils/jobAdapter';
 import { useApp } from '../../context/AppContext';
 import { ProfileStackParamList } from '../../navigation/types';
+import { startJobCall } from '../../utils/call';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'MyApplications'>;
 
@@ -21,6 +22,7 @@ export const MyApplicationsScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
+  const [callingJobId, setCallingJobId] = useState<string | null>(null);
 
   const fetchApplications = useCallback(() => {
     if (!accessToken) return;
@@ -59,6 +61,16 @@ export const MyApplicationsScreen: React.FC<Props> = ({ navigation }) => {
         otherUserAvatar: job.postedBy.photoUrl,
       },
     } as never);
+  };
+
+  const handleCall = async (job: BackendJob) => {
+    if (!accessToken || callingJobId) return;
+    setCallingJobId(job._id);
+    try {
+      await startJobCall(accessToken, job._id);
+    } finally {
+      setCallingJobId(null);
+    }
   };
 
   const confirmCancelAccepted = (job: BackendJob) => {
@@ -114,6 +126,8 @@ export const MyApplicationsScreen: React.FC<Props> = ({ navigation }) => {
                     navigation.getParent()?.navigate('HomeTab', { screen: 'JobDetail', params: { jobId: item._id } } as never)
                   }
                   onMessage={() => openAcceptedChat(item)}
+                  onCall={() => handleCall(item)}
+                  calling={callingJobId === item._id}
                   onCancel={() => confirmCancelAccepted(item)}
                   cancelling={cancellingJobId === item._id}
                 />
@@ -156,9 +170,11 @@ const AcceptedApplicationCard: React.FC<{
   job: BackendJob;
   onOpenJob: () => void;
   onMessage: () => void;
+  onCall: () => void;
+  calling: boolean;
   onCancel: () => void;
   cancelling: boolean;
-}> = ({ job, onOpenJob, onMessage, onCancel, cancelling }) => (
+}> = ({ job, onOpenJob, onMessage, onCall, calling, onCancel, cancelling }) => (
   <View style={styles.acceptedCard}>
     <View style={styles.acceptedTop}>
       <Avatar
@@ -186,6 +202,10 @@ const AcceptedApplicationCard: React.FC<{
       <Pressable accessibilityRole="button" style={styles.secondaryAction} onPress={onOpenJob}>
         <MaterialCommunityIcons name="shield-key-outline" size={18} color={theme.colors.primary} />
         <Text style={styles.secondaryActionText}>View OTP</Text>
+      </Pressable>
+      <Pressable accessibilityRole="button" disabled={calling} style={styles.secondaryAction} onPress={onCall}>
+        <MaterialCommunityIcons name="phone-outline" size={18} color={theme.colors.primary} />
+        <Text style={styles.secondaryActionText}>{calling ? 'Calling...' : 'Call'}</Text>
       </Pressable>
       <Pressable accessibilityRole="button" style={styles.primaryAction} onPress={onMessage}>
         <MaterialCommunityIcons name="chat-processing-outline" size={18} color={theme.colors.textInverse} />

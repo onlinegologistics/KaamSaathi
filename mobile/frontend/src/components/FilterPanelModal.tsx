@@ -6,7 +6,6 @@ import { theme } from '../theme';
 import { Button } from './Button';
 import { IconButton } from './IconButton';
 import { Chip } from './Chip';
-import { categories } from '../data/categories';
 import { useApp } from '../context/AppContext';
 import { JobCategory } from '../types';
 
@@ -39,7 +38,7 @@ export const FilterPanelModal: React.FC<FilterPanelModalProps> = ({
   onClose,
   onApply,
 }) => {
-  const { t } = useApp();
+  const { t, categories, categoryGroups } = useApp();
   const [filters, setFilters] = useState<FilterState>(initialFilters);
 
   useEffect(() => {
@@ -71,26 +70,35 @@ export const FilterPanelModal: React.FC<FilterPanelModalProps> = ({
 
           <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
             <Text style={styles.sectionTitle}>{t('category')}</Text>
-            <View style={styles.categoryGrid}>
-              {categories.slice(0, 5).map((cat) => {
-                const selected = filters.categories.includes(cat.key);
-                return (
-                  <Pressable
-                    key={cat.key}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={t(cat.labelKey)}
-                    onPress={() => toggleCategory(cat.key)}
-                    style={styles.categoryOption}
-                  >
-                    <View style={[styles.categoryCircle, selected && styles.categoryCircleActive]}>
-                      <MaterialCommunityIcons name={cat.icon as any} size={22} color={selected ? theme.colors.textInverse : theme.colors.textSecondary} />
-                    </View>
-                    <Text style={styles.categoryLabel} numberOfLines={1}>{t(cat.labelKey)}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            {categoryGroups.map((group) => {
+              const items = categories.filter((cat) => cat.groupKey === group.key);
+              if (!items.length) return null;
+              return (
+                <View key={group.key} style={styles.categoryGroup}>
+                  <Text style={styles.categoryGroupTitle}>{group.name}</Text>
+                  <View style={styles.categoryGrid}>
+                    {items.map((cat) => {
+                      const selected = filters.categories.includes(cat.key);
+                      return (
+                        <Pressable
+                          key={cat.key}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected }}
+                          accessibilityLabel={cat.label}
+                          onPress={() => toggleCategory(cat.key)}
+                          style={styles.categoryOption}
+                        >
+                          <View style={[styles.categoryCircle, selected && styles.categoryCircleActive]}>
+                            <MaterialCommunityIcons name={cat.icon as any} size={22} color={selected ? theme.colors.textInverse : theme.colors.textSecondary} />
+                          </View>
+                          <Text style={styles.categoryLabel} numberOfLines={1}>{cat.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              );
+            })}
 
           <View style={styles.sectionDivider} />
 
@@ -211,11 +219,20 @@ const styles = StyleSheet.create({
   },
   categoryGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
     gap: theme.spacing.xs,
   },
+  categoryGroup: {
+    marginBottom: theme.spacing.md,
+  },
+  categoryGroupTitle: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '800',
+    marginBottom: theme.spacing.xs,
+  },
   categoryOption: {
-    flex: 1,
+    width: '23%',
     alignItems: 'center',
     gap: 6,
   },

@@ -30,6 +30,7 @@ module.exports = {
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-me',
   jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
+  bcryptSaltRounds: toNumber(process.env.BCRYPT_SALT_ROUNDS, 10),
   otpExpiresMinutes: toNumber(process.env.OTP_EXPIRES_MINUTES, 5),
   otpMaxAttempts: toNumber(process.env.OTP_MAX_ATTEMPTS, 5),
   otpPepper: process.env.OTP_PEPPER || 'dev-otp-pepper-change-me',

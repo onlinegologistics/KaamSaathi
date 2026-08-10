@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { spawn, spawnSync } = require('node:child_process');
+const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
@@ -8,6 +9,18 @@ const path = require('node:path');
 const DEFAULT_PORT = Number(process.env.EXPO_START_PORT || 8081);
 const PORT_SCAN_LIMIT = 20;
 const userArgs = process.argv.slice(2);
+
+const loadPackageJson = () => {
+  try {
+    const pkgPath = path.join(__dirname, '..', 'package.json');
+    return JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  } catch {
+    return {};
+  }
+};
+
+const { dependencies = {}, devDependencies = {} } = loadPackageJson();
+const hasDevClientInstalled = Boolean(dependencies['expo-dev-client'] || devDependencies['expo-dev-client']);
 
 const hasFlag = (...flags) =>
   userArgs.some((arg, index) => flags.includes(arg) || flags.some((flag) => arg.startsWith(`${flag}=`)));
@@ -130,7 +143,7 @@ const run = async () => {
   const shouldTryReverse = selectedPort && !hasFlag('--lan', '--tunnel') && androidDevices.length > 0;
 
   if (!hasFlag('--go', '--dev-client')) {
-    expoArgs.push('--go');
+    expoArgs.push(hasDevClientInstalled ? '--dev-client' : '--go');
   }
 
   if (!hasFlag('--clear', '-c')) {

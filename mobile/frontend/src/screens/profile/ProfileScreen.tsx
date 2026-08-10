@@ -1,22 +1,52 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { theme } from '../../theme';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { Avatar } from '../../components/Avatar';
 import { listJobs } from '../../services/api';
 import { useApp } from '../../context/AppContext';
-import { ProfileStackParamList } from '../../navigation/types';
+import type { ProfileEditSection, ProfileStackParamList } from '../../navigation/types';
+import { getProfileCompletionPercent, getProfileCompletionTasks } from '../../utils/profileCompletion';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'ProfileMain'>;
 
+// KYC (and, transitively, Wallet once KYC is verified) doesn't need every last profile
+// field filled in first — 75% is enough to start, so users aren't blocked by something
+// minor like a missing avatar or language tag.
+const KYC_UNLOCK_PROFILE_PERCENT = 75;
+
+const reviewBadgeFor = (status?: string) => {
+  if (status === 'verified') return { text: 'Approved', color: theme.colors.success };
+  if (status === 'submitted') return { text: 'Under review - 24h', color: theme.colors.warning };
+  if (status === 'rejected') return { text: 'Rejected', color: theme.colors.danger };
+  return { text: 'Pending', color: theme.colors.primary };
+};
+
 export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
-  const { t, accessToken, currentUser, logout, bookmarkedJobIds, appliedJobIds } = useApp();
+  const { t, accessToken, currentUser, logout, bookmarkedJobIds, appliedJobIds, refreshProfile } = useApp();
   const [postedCount, setPostedCount] = useState(0);
+
+  // KYC/wallet approvals happen server-side (an admin, outside this app session) — refetch
+  // whenever this screen regains focus so status/percent never sits stale.
+  useFocusEffect(
+    useCallback(() => {
+      refreshProfile();
+    }, [refreshProfile])
+  );
 
   const savedCount = bookmarkedJobIds.length;
   const appliedCount = appliedJobIds.length;
+  const setupTasks = useMemo(() => getProfileCompletionTasks(currentUser), [currentUser]);
+  const profileComplete = setupTasks.find((task) => task.key === 'profile')?.complete ?? false;
+  const kycComplete = setupTasks.find((task) => task.key === 'kyc')?.complete ?? false;
+  const walletComplete = setupTasks.find((task) => task.key === 'wallet')?.complete ?? false;
+  const profilePercent = useMemo(() => getProfileCompletionPercent(currentUser), [currentUser]);
+  const canStartKyc = profileComplete || profilePercent >= KYC_UNLOCK_PROFILE_PERCENT;
+  const kycBadge = reviewBadgeFor(currentUser?.kyc?.status);
+  const walletBadge = reviewBadgeFor(currentUser?.wallet?.status);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -30,6 +60,25 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       { text: t('cancel'), style: 'cancel' },
       { text: t('logout'), style: 'destructive', onPress: logout },
     ]);
+  };
+
+  const openSetupSection = (section: ProfileEditSection) => {
+    if (section === 'kyc' && !canStartKyc) {
+      Alert.alert(
+        'Complete Profile First',
+        `Profile ${KYC_UNLOCK_PROFILE_PERCENT}% complete karne ke baad KYC start hoga. Abhi ${profilePercent}% hai.`
+      );
+      return;
+    }
+    if (section === 'wallet' && !kycComplete) {
+      Alert.alert('Complete KYC First', 'Wallet setup se pehle KYC complete karna hoga.');
+      return;
+    }
+    if (section === 'wallet' && walletComplete) {
+      navigation.navigate('Wallet');
+      return;
+    }
+    navigation.navigate('EditProfile', { section });
   };
 
   return (
@@ -48,13 +97,23 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.identity}>
-          <Avatar uri={currentUser?.avatar} name={currentUser?.name ?? 'User'} size={92} verified={currentUser?.verified} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('editProfile')}
+            onPress={() => navigation.navigate('EditProfile', { section: 'profile' })}
+            style={({ pressed }) => [styles.avatarWrap, pressed && styles.pressed]}
+          >
+            <Avatar uri={currentUser?.avatar} name={currentUser?.name ?? 'User'} size={92} verified={currentUser?.verified} />
+            <View style={styles.avatarEditBadge}>
+              <MaterialCommunityIcons name="camera" size={16} color={theme.colors.textInverse} />
+            </View>
+          </Pressable>
           <Text style={styles.name}>{currentUser?.name ?? 'User'}</Text>
           <Text style={styles.phone}>{currentUser?.phone}</Text>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('editProfile')}
-            onPress={() => navigation.navigate('EditProfile')}
+            onPress={() => navigation.navigate('EditProfile', { section: 'profile' })}
             style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]}
           >
             <MaterialCommunityIcons name="pencil-outline" size={15} color={theme.colors.primary} />
@@ -62,42 +121,75 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           </Pressable>
         </View>
 
-        <MenuCard
-          icon="briefcase-outline"
-          tint={theme.colors.primary}
-          title="My Jobs"
-          subtitle={`${postedCount} posted • ${appliedCount} applied`}
-          onPress={() => navigation.navigate('JobApplicants')}
-        />
-        <MenuCard
-          icon="send-outline"
-          tint={theme.colors.secondary}
-          title={t('myApplications')}
-          subtitle={`${appliedCount} jobs you applied to`}
-          onPress={() => navigation.navigate('MyApplications')}
-        />
-        <MenuCard
-          icon="bookmark-outline"
-          tint={theme.colors.accentDark}
-          title={t('savedJobs')}
-          subtitle={`${savedCount} jobs you bookmarked`}
-          onPress={() => navigation.navigate('SavedJobs')}
-        />
-        <MenuCard
-          icon="help-circle-outline"
-          tint={theme.colors.categoryElectrician}
-          title={t('help')}
-          subtitle="Get help and contact support"
-          onPress={() => navigation.navigate('HelpSupport')}
-        />
-        <MenuCard
-          icon="logout"
-          tint={theme.colors.danger}
-          title={t('logout')}
-          subtitle="Sign out of this device"
-          destructive
-          onPress={confirmLogout}
-        />
+        <View style={styles.menuList}>
+          <SetupStepCard
+            icon="account-check-outline"
+            tint={theme.colors.primary}
+            title="Profile"
+            subtitle="Personal and work details"
+            complete={profileComplete}
+            statusText={profileComplete ? undefined : `${profilePercent}%`}
+            onPress={() => openSetupSection('profile')}
+          />
+          <SetupStepCard
+            icon="wallet-outline"
+            tint={theme.colors.accentDark}
+            title={walletComplete ? 'Wallet' : 'Wallet Setup'}
+            subtitle="Required for money withdrawal"
+            complete={walletComplete}
+            statusText={walletBadge.text}
+            statusColor={walletBadge.color}
+            locked={!kycComplete}
+            onPress={() => openSetupSection('wallet')}
+          />
+          <MenuCard
+            icon="briefcase-outline"
+            tint={theme.colors.primary}
+            title="My Jobs"
+            subtitle={`${postedCount} posted • ${appliedCount} applied`}
+            onPress={() => navigation.navigate('JobApplicants')}
+          />
+          <MenuCard
+            icon="send-outline"
+            tint={theme.colors.secondary}
+            title={t('myApplications')}
+            subtitle={`${appliedCount} jobs you applied to`}
+            onPress={() => navigation.navigate('MyApplications')}
+          />
+          <MenuCard
+            icon="bookmark-outline"
+            tint={theme.colors.accentDark}
+            title={t('savedJobs')}
+            subtitle={`${savedCount} jobs you bookmarked`}
+            onPress={() => navigation.navigate('SavedJobs')}
+          />
+          <SetupStepCard
+            icon="shield-check-outline"
+            tint={theme.colors.secondary}
+            title="KYC"
+            subtitle="Required for job apply and post"
+            complete={kycComplete}
+            statusText={kycBadge.text}
+            statusColor={kycBadge.color}
+            locked={!canStartKyc}
+            onPress={() => openSetupSection('kyc')}
+          />
+          <MenuCard
+            icon="help-circle-outline"
+            tint={theme.colors.categoryElectrician}
+            title={t('help')}
+            subtitle="Get help and contact support"
+            onPress={() => navigation.navigate('HelpSupport')}
+          />
+          <MenuCard
+            icon="logout"
+            tint={theme.colors.danger}
+            title={t('logout')}
+            subtitle="Sign out of this device"
+            destructive
+            onPress={confirmLogout}
+          />
+        </View>
       </ScrollView>
     </ScreenContainer>
   );
@@ -130,6 +222,51 @@ const MenuCard: React.FC<{
   </Pressable>
 );
 
+const SetupStepCard: React.FC<{
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  tint: string;
+  title: string;
+  subtitle: string;
+  complete: boolean;
+  statusText?: string;
+  statusColor?: string;
+  locked?: boolean;
+  onPress: () => void;
+}> = ({ icon, tint, title, subtitle, complete, statusText, statusColor, locked, onPress }) => {
+  const showStatus = locked || !complete;
+  const status = locked ? 'Locked' : statusText ?? 'Pending';
+  const resolvedStatusColor = locked ? theme.colors.textMuted : statusColor ?? theme.colors.primary;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      onPress={onPress}
+      style={({ pressed }) => [styles.setupCard, pressed && styles.pressed, locked && styles.setupCardLocked]}
+    >
+      <View style={[styles.setupIcon, { backgroundColor: `${tint}1A` }]}>
+        <MaterialCommunityIcons
+          name={locked ? 'lock-outline' : complete ? 'check' : icon}
+          size={22}
+          color={locked ? theme.colors.textMuted : complete ? theme.colors.success : tint}
+        />
+      </View>
+      <View style={styles.cardCopy}>
+        <Text style={styles.cardTitle}>{title}</Text>
+        <Text style={styles.cardSubtitle} numberOfLines={1}>
+          {subtitle}
+        </Text>
+      </View>
+      {showStatus && (
+        <View style={[styles.statusPill, { borderColor: `${resolvedStatusColor}55` }]}>
+          <Text style={[styles.statusText, { color: resolvedStatusColor }]}>{status}</Text>
+        </View>
+      )}
+      <MaterialCommunityIcons name="chevron-right" size={22} color={theme.colors.textMuted} />
+    </Pressable>
+  );
+};
+
 const styles = StyleSheet.create({
   container: {
     paddingTop: 0,
@@ -160,6 +297,23 @@ const styles = StyleSheet.create({
     paddingTop: theme.spacing.md,
     paddingBottom: theme.spacing.xl,
   },
+  avatarWrap: {
+    width: 92,
+    height: 92,
+  },
+  avatarEditBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: theme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.surface,
+  },
   name: {
     ...theme.typography.h2,
     color: theme.colors.text,
@@ -184,6 +338,41 @@ const styles = StyleSheet.create({
     ...theme.typography.caption,
     color: theme.colors.primary,
     fontWeight: '700',
+  },
+  menuList: {
+    marginBottom: theme.spacing.md,
+  },
+  setupCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.lg,
+    padding: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  setupCardLocked: {
+    opacity: 0.72,
+  },
+  setupIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: theme.radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusPill: {
+    minHeight: 26,
+    borderWidth: 1,
+    borderRadius: theme.radius.pill,
+    justifyContent: 'center',
+    paddingHorizontal: theme.spacing.sm,
+    marginRight: theme.spacing.xs,
+  },
+  statusText: {
+    ...theme.typography.tiny,
+    fontWeight: '800',
   },
   card: {
     flexDirection: 'row',

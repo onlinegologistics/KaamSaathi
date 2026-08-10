@@ -33,13 +33,50 @@ export interface GeoPoint {
   address?: string;
 }
 
+export type ReviewStatus = 'not_started' | 'submitted' | 'verified' | 'rejected';
+
+export interface CategoryDocument {
+  category: string;
+  label: string;
+  documentUrl: string;
+}
+
+export interface KycProfile {
+  status: ReviewStatus;
+  aadhaarCardUrl?: string;
+  selfieUrl?: string;
+  drivingLicenseUrl?: string;
+  categoryDocuments?: CategoryDocument[];
+  submittedAt?: string;
+  verifiedAt?: string;
+  rejectionReason?: string;
+}
+
+export interface WalletProfile {
+  status: ReviewStatus;
+  upiId?: string;
+  bankAccountNumber?: string;
+  bankAccountHolderName?: string;
+  ifscCode?: string;
+  panNumber?: string;
+  balance?: number;
+  setupCompletedAt?: string;
+  submittedAt?: string;
+  verifiedAt?: string;
+  rejectionReason?: string;
+}
+
 export interface User {
   _id: string;
   name?: string;
   phone: string;
   photoUrl?: string;
+  email?: string;
+  accountType?: 'worker' | 'employer' | 'both';
   location?: GeoPoint;
   aadhaarVerification: AadhaarVerification;
+  kyc?: KycProfile;
+  wallet?: WalletProfile;
   ratingAverage: number;
   ratingCount: number;
   jobsCompletedCount: number;
@@ -62,6 +99,7 @@ export interface Job {
   _id: string;
   postedBy: string | { _id: string; name?: string; phone: string; photoUrl?: string };
   category: string;
+  categoryGroup?: string;
   title: string;
   description: string;
   location: GeoPoint;
@@ -79,10 +117,26 @@ export interface Category {
   _id: string;
   name: string;
   key: string;
+  groupKey: 'labor' | 'skilled-workers' | 'professional' | 'home-services';
+  groupName: 'Labor' | 'Skilled Workers' | 'Professional' | 'Home Services';
   icon: string;
   color: string;
+  kycDocumentLabel?: string;
   isActive: boolean;
   sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MinimumPriceRule {
+  _id: string;
+  city: string;
+  area: string;
+  category: string;
+  baseMinimumPrice: number;
+  hourlyRate?: number;
+  minimumDurationMinutes?: number;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -97,6 +151,19 @@ export interface Transaction {
   status: 'pending' | 'completed' | 'failed' | 'refunded';
   date: string;
   notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WalletTransaction {
+  _id: string;
+  user: string | { _id: string; name?: string; phone: string };
+  type: 'credit' | 'debit';
+  source: 'add_money' | 'withdrawal';
+  amount: number;
+  status: 'completed' | 'pending' | 'rejected';
+  balanceAfter: number;
+  note: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -119,6 +186,7 @@ export interface Report {
   targetId: string;
   reporterId: string | { _id: string; name?: string; phone: string };
   reason: string;
+  description?: string;
   status: 'pending' | 'approved' | 'rejected';
   reviewedBy: string | null;
   reviewedAt: string | null;

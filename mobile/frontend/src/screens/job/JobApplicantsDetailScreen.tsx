@@ -7,6 +7,7 @@ import { ScreenContainer } from '../../components/ScreenContainer';
 import { IconButton } from '../../components/IconButton';
 import { Button } from '../../components/Button';
 import { Avatar } from '../../components/Avatar';
+import { ReportModal } from '../../components/ReportModal';
 import {
   getJob,
   acceptApplicant,
@@ -19,6 +20,7 @@ import {
 } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { ProfileStackParamList } from '../../navigation/types';
+import { startJobCall } from '../../utils/call';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'JobApplicantsDetail'>;
 
@@ -31,6 +33,8 @@ export const JobApplicantsDetailScreen: React.FC<Props> = ({ route, navigation }
   const [actioningUserId, setActioningUserId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [otpDraft, setOtpDraft] = useState('');
+  const [reportUserId, setReportUserId] = useState<string | null>(null);
+  const [callingUserId, setCallingUserId] = useState<string | null>(null);
 
   const fetchJob = useCallback(() => {
     if (!accessToken) return;
@@ -99,6 +103,16 @@ export const JobApplicantsDetailScreen: React.FC<Props> = ({ route, navigation }
       } as never);
     } catch (e) {
       Alert.alert('Could not open chat', e instanceof Error ? e.message : 'Try again.');
+    }
+  };
+
+  const handleCall = async (applicantUserId: string) => {
+    if (!accessToken || callingUserId) return;
+    setCallingUserId(applicantUserId);
+    try {
+      await startJobCall(accessToken, jobId);
+    } finally {
+      setCallingUserId(null);
     }
   };
 
@@ -178,6 +192,12 @@ export const JobApplicantsDetailScreen: React.FC<Props> = ({ route, navigation }
             onAccept={() => handleAccept(item)}
             onReject={() => handleReject(item)}
             onMessage={() => handleMessage(item)}
+            onCall={() => handleCall(item.userId._id)}
+            calling={callingUserId === item.userId._id}
+            onLiveLocation={() =>
+              navigation.navigate('LiveLocation', { jobId, otherUserName: item.userId.name || 'User' })
+            }
+            onReport={() => setReportUserId(item.userId._id)}
             otpDraft={otpDraft}
             onOtpChange={setOtpDraft}
             onVerifyOtp={handleVerifyOtp}
@@ -192,6 +212,13 @@ export const JobApplicantsDetailScreen: React.FC<Props> = ({ route, navigation }
           </View>
         }
       />
+
+      <ReportModal
+        visible={!!reportUserId}
+        targetType="user"
+        targetId={reportUserId ?? ''}
+        onClose={() => setReportUserId(null)}
+      />
     </ScreenContainer>
   );
 };
@@ -202,6 +229,10 @@ const ApplicantRow: React.FC<{
   onAccept: () => void;
   onReject: () => void;
   onMessage: () => void;
+  onCall: () => void;
+  calling: boolean;
+  onLiveLocation: () => void;
+  onReport: () => void;
   otpDraft: string;
   onOtpChange: (text: string) => void;
   onVerifyOtp: () => void;
@@ -213,6 +244,10 @@ const ApplicantRow: React.FC<{
   onAccept,
   onReject,
   onMessage,
+  onCall,
+  calling,
+  onLiveLocation,
+  onReport,
   otpDraft,
   onOtpChange,
   onVerifyOtp,
@@ -220,55 +255,63 @@ const ApplicantRow: React.FC<{
   otpVerified,
 }) => (
   <View style={styles.row}>
-    <Avatar uri={applicant.userId.photoUrl} name={applicant.userId.name || 'User'} size={48} />
-    <View style={styles.rowBody}>
-      <Text style={styles.rowName}>{applicant.userId.name || 'User'}</Text>
-      <Text style={styles.rowMeta}>{applicant.userId.phone}</Text>
-      {canVerify && (
-        <View style={styles.otpBox}>
-          <View style={styles.otpStatusRow}>
-            <MaterialCommunityIcons
-              name={otpVerified ? 'shield-check-outline' : 'shield-key-outline'}
-              size={18}
-              color={otpVerified ? theme.colors.success : theme.colors.primary}
-            />
-            <Text style={[styles.otpStatus, otpVerified && styles.otpStatusDone]}>
-              {otpVerified ? 'Worker OTP verified' : 'Verify worker OTP'}
-            </Text>
-          </View>
-          {!otpVerified && (
-            <View style={styles.otpInputRow}>
-              <TextInput
-                value={otpDraft}
-                onChangeText={(text) => onOtpChange(text.replace(/\D/g, '').slice(0, 6))}
-                placeholder="Enter OTP"
-                placeholderTextColor={theme.colors.textMuted}
-                keyboardType="number-pad"
-                maxLength={6}
-                style={styles.otpInput}
-              />
-              <Button
-                label="Verify"
-                onPress={onVerifyOtp}
-                disabled={otpDraft.length !== 6 || busy}
-                loading={busy}
-                style={styles.verifyBtn}
-              />
-            </View>
-          )}
+    <View style={styles.rowTop}>
+      <Avatar uri={applicant.userId.photoUrl} name={applicant.userId.name || 'User'} size={48} />
+      <View style={styles.rowBody}>
+        <Text style={styles.rowName}>{applicant.userId.name || 'User'}</Text>
+        <Text style={styles.rowMeta}>{applicant.userId.phone}</Text>
+      </View>
+      {applicant.status === 'applied' && (
+        <View style={styles.actions}>
+          <Button label="Accept" onPress={onAccept} loading={busy} style={styles.actionBtn} />
+          <Button label="Reject" onPress={onReject} variant="outline" disabled={busy} style={styles.actionBtn} />
         </View>
       )}
+      {applicant.status === 'accepted' && (
+        <View style={styles.actions}>
+          <Button label="Call" onPress={onCall} loading={calling} variant="outline" style={styles.actionBtn} />
+          <Button label="Message" onPress={onMessage} variant="outline" style={styles.actionBtn} />
+          <Button label="Location" onPress={onLiveLocation} variant="outline" style={styles.actionBtn} />
+        </View>
+      )}
+      {applicant.status === 'rejected' && <Text style={styles.rejectedText}>Rejected</Text>}
+      <IconButton name="flag-outline" accessibilityLabel="Report user" onPress={onReport} color={theme.colors.textMuted} />
     </View>
-    {applicant.status === 'applied' && (
-      <View style={styles.actions}>
-        <Button label="Accept" onPress={onAccept} loading={busy} style={styles.actionBtn} />
-        <Button label="Reject" onPress={onReject} variant="outline" disabled={busy} style={styles.actionBtn} />
+
+    {canVerify && (
+      <View style={styles.otpBox}>
+        <View style={styles.otpStatusRow}>
+          <MaterialCommunityIcons
+            name={otpVerified ? 'shield-check-outline' : 'shield-key-outline'}
+            size={18}
+            color={otpVerified ? theme.colors.success : theme.colors.primary}
+          />
+          <Text style={[styles.otpStatus, otpVerified && styles.otpStatusDone]}>
+            {otpVerified ? 'Worker OTP verified' : 'Verify worker OTP'}
+          </Text>
+        </View>
+        {!otpVerified && (
+          <View style={styles.otpInputRow}>
+            <TextInput
+              value={otpDraft}
+              onChangeText={(text) => onOtpChange(text.replace(/\D/g, '').slice(0, 6))}
+              placeholder="Enter OTP"
+              placeholderTextColor={theme.colors.textMuted}
+              keyboardType="number-pad"
+              maxLength={6}
+              style={styles.otpInput}
+            />
+            <Button
+              label="Verify"
+              onPress={onVerifyOtp}
+              disabled={otpDraft.length !== 6 || busy}
+              loading={busy}
+              style={styles.verifyBtn}
+            />
+          </View>
+        )}
       </View>
     )}
-    {applicant.status === 'accepted' && (
-      <Button label="Message" onPress={onMessage} variant="outline" style={styles.actionBtn} />
-    )}
-    {applicant.status === 'rejected' && <Text style={styles.rejectedText}>Rejected</Text>}
   </View>
 );
 
@@ -300,12 +343,14 @@ const styles = StyleSheet.create({
     paddingTop: theme.spacing.sm,
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
     paddingVertical: theme.spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.divider,
+  },
+  rowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
   },
   rowBody: {
     flex: 1,

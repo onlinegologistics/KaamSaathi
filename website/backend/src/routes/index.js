@@ -8,6 +8,8 @@ const reportRoutes = require('./reportRoutes');
 const settingRoutes = require('./settingRoutes');
 const transactionRoutes = require('./transactionRoutes');
 const payoutRoutes = require('./payoutRoutes');
+const walletTransactionRoutes = require('./walletTransactionRoutes');
+const pricingRoutes = require('./pricingRoutes');
 
 const router = express.Router();
 
@@ -20,5 +22,7 @@ router.use('/reports', reportRoutes);
 router.use('/settings', settingRoutes);
 router.use('/transactions', transactionRoutes);
 router.use('/payouts', payoutRoutes);
+router.use('/wallet', walletTransactionRoutes);
+router.use('/pricing', pricingRoutes);
 
 module.exports = router;

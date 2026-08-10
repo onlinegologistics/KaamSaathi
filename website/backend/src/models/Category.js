@@ -21,10 +21,32 @@ const categorySchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    groupKey: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+      enum: ['labor', 'skilled-workers', 'professional', 'home-services'],
+      default: 'labor',
+      index: true,
+    },
+    groupName: {
+      type: String,
+      required: true,
+      trim: true,
+      enum: ['Labor', 'Skilled Workers', 'Professional', 'Home Services'],
+      default: 'Labor',
+    },
     color: {
       type: String,
       trim: true,
       default: '',
+    },
+    kycDocumentLabel: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 120,
     },
     isActive: {
       type: Boolean,

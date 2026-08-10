@@ -23,15 +23,27 @@ const VERIFICATION_OPTIONS = [
   { value: 'false', label: 'Unverified' },
 ];
 
+const REVIEW_STATUS_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'submitted', label: 'Submitted' },
+  { value: 'verified', label: 'Verified' },
+  { value: 'rejected', label: 'Rejected' },
+  { value: 'not_started', label: 'Not Started' },
+];
+
 export const UsersPage = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [isVerified, setIsVerified] = useState('all');
+  const [kycStatus, setKycStatus] = useState('all');
+  const [walletStatus, setWalletStatus] = useState('all');
   const [page, setPage] = useState(1);
 
   const { data, isLoading } = useUsersList({
     search: search || undefined,
     isVerified: isVerified === 'all' ? undefined : isVerified === 'true',
+    kycStatus: kycStatus === 'all' ? undefined : kycStatus,
+    walletStatus: walletStatus === 'all' ? undefined : walletStatus,
     page,
     limit: 20,
   });
@@ -55,6 +67,16 @@ export const UsersPage = () => {
       id: 'rating',
       header: 'Rating',
       cell: ({ row }) => `${row.original.ratingAverage.toFixed(1)} ★ (${row.original.ratingCount})`,
+    },
+    {
+      id: 'kyc',
+      header: 'KYC',
+      cell: ({ row }) => <StatusBadge status={row.original.kyc?.status ?? 'not_started'} />,
+    },
+    {
+      id: 'wallet',
+      header: 'Wallet',
+      cell: ({ row }) => <StatusBadge status={row.original.wallet?.status ?? 'not_started'} />,
     },
     { id: 'jobsCompleted', header: 'Jobs Completed', cell: ({ row }) => row.original.jobsCompletedCount },
     {
@@ -84,7 +106,7 @@ export const UsersPage = () => {
     <div>
       <PageHeader title="User Management" description="Search, filter, and manage platform users." />
 
-      <div className="mb-4 flex gap-3">
+      <div className="mb-4 flex flex-wrap gap-3">
         <Input
           placeholder="Search by name or phone…"
           value={search}
@@ -108,6 +130,42 @@ export const UsersPage = () => {
             {VERIFICATION_OPTIONS.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={kycStatus}
+          onValueChange={(v) => {
+            setKycStatus(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="KYC" />
+          </SelectTrigger>
+          <SelectContent>
+            {REVIEW_STATUS_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                KYC: {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={walletStatus}
+          onValueChange={(v) => {
+            setWalletStatus(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="Wallet" />
+          </SelectTrigger>
+          <SelectContent>
+            {REVIEW_STATUS_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                Wallet: {opt.label}
               </SelectItem>
             ))}
           </SelectContent>

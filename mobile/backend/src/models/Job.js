@@ -38,6 +38,11 @@ const jobSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    categoryGroup: {
+      type: String,
+      trim: true,
+      index: true,
+    },
     title: {
       type: String,
       required: true,
@@ -130,6 +135,19 @@ const jobSchema = new mongoose.Schema(
       type: Date,
       required: true,
       index: true,
+    },
+    // Always server-computed from scheduledFor + duration — never trust a client-sent value.
+    endAt: {
+      type: Date,
+      default: undefined,
+    },
+    // Recommendation shown to the employer at post time (see pricingService) — frozen at
+    // creation so it never drifts if an admin later edits the underlying MinimumPriceRule.
+    // payAmount (above) remains the single "offered price" field — no separate duplicate.
+    suggestedMinimumPrice: {
+      type: Number,
+      min: 0,
+      default: undefined,
     },
   },
   {

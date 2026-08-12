@@ -78,7 +78,29 @@ const toQueryString = (query?: RequestOptions['query']) => {
   return qs ? `?${qs}` : '';
 };
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+// The access token is short-lived (15 min server-side) by design — kept in sync with
+// AppContext's `tokens` state via setAuthTokens/setAuthHandlers so `request()` can silently
+// refresh it and retry on expiry, without every call site that threads accessToken through
+// explicitly needing to know about it. Without this, any screen that takes the user a few
+// minutes to use (Wallet setup, KYC, ...) hit a raw "token expired" error mid-flow.
+let currentTokens: TokenPair | null = null;
+let onTokensRefreshed: ((tokens: TokenPair) => void) | null = null;
+let onAuthExpired: (() => void) | null = null;
+let refreshInFlight: Promise<TokenPair> | null = null;
+
+export const setAuthTokens = (tokens: TokenPair | null) => {
+  currentTokens = tokens;
+};
+
+export const setAuthHandlers = (handlers: {
+  onTokensRefreshed?: (tokens: TokenPair) => void;
+  onAuthExpired?: () => void;
+}) => {
+  onTokensRefreshed = handlers.onTokensRefreshed ?? null;
+  onAuthExpired = handlers.onAuthExpired ?? null;
+};
+
+const rawFetch = async (path: string, options: RequestOptions) => {
   const res = await fetch(`${API_BASE_URL}${path}${toQueryString(options.query)}`, {
     method: options.method ?? 'GET',
     headers: {
@@ -87,14 +109,65 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
-
   const data = await res.json().catch(() => ({}));
+  return { res, data };
+};
+
+const refreshAccessToken = async (): Promise<TokenPair> => {
+  if (!currentTokens?.refreshToken) {
+    throw new ApiRequestError(401, 'Session expired', 'AUTH_TOKEN_INVALID');
+  }
+  if (!refreshInFlight) {
+    // Concurrent requests that all 401 at once share one refresh call instead of each
+    // racing to rotate the refresh token (the server revokes it on every use).
+    refreshInFlight = (async () => {
+      const { res, data } = await rawFetch('/auth/refresh', {
+        method: 'POST',
+        body: { refreshToken: currentTokens!.refreshToken },
+      });
+      if (!res.ok || data.success === false) {
+        throw new ApiRequestError(res.status, data.error?.message ?? 'Session expired', data.error?.code ?? data.code);
+      }
+      const tokens: TokenPair = { accessToken: data.accessToken, refreshToken: data.refreshToken };
+      currentTokens = tokens;
+      onTokensRefreshed?.(tokens);
+      return tokens;
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+};
+
+async function request<T>(path: string, options: RequestOptions = {}, isRetry = false): Promise<T> {
+  const { res, data } = await rawFetch(path, options);
 
   if (!res.ok || data.success === false) {
+    const code = data.error?.code ?? data.code;
+    const isExpiredAccessToken =
+      res.status === 401 &&
+      !!options.accessToken &&
+      !isRetry &&
+      ['AUTH_TOKEN_INVALID', 'AUTH_TOKEN_MISSING', 'AUTH_TOKEN_INVALID_TYPE'].includes(code);
+
+    if (isExpiredAccessToken) {
+      try {
+        const fresh = await refreshAccessToken();
+        return request<T>(path, { ...options, accessToken: fresh.accessToken }, true);
+      } catch (refreshError) {
+        // Only force a logout when the server actually rejected the refresh token (expired,
+        // revoked, or user deactivated) — a network blip while refreshing shouldn't sign
+        // someone out, just surface the original error and let them retry.
+        if (refreshError instanceof ApiRequestError) {
+          onAuthExpired?.();
+        }
+      }
+    }
+
     throw new ApiRequestError(
       res.status,
       data.error?.message ?? data.message ?? 'Something went wrong',
-      data.error?.code ?? data.code,
+      code,
       data.error?.details
     );
   }

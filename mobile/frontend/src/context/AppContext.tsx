@@ -24,6 +24,8 @@ import {
   listNotifications as apiListNotifications,
   markNotificationRead as apiMarkNotificationRead,
   markAllNotificationsRead as apiMarkAllNotificationsRead,
+  setAuthTokens,
+  setAuthHandlers,
 } from '../services/api';
 import { categories as fallbackCategories, categoryGroups as fallbackCategoryGroups } from '../data/categories';
 import { RemoteSettings, fetchRemoteSettings } from '../services/settings';
@@ -436,6 +438,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAnnouncementSeen(true);
     setWelcome(null);
   }, []);
+
+  // Keeps api.ts's module-level token copy in sync so request() can silently refresh an
+  // expired access token and retry, mid-request, without every call site needing to care.
+  useEffect(() => {
+    setAuthTokens(tokens);
+  }, [tokens]);
+
+  useEffect(() => {
+    setAuthHandlers({
+      onTokensRefreshed: (fresh) => setTokens(fresh),
+      onAuthExpired: () => logout(),
+    });
+  }, [logout]);
 
   const dismissAnnouncement = useCallback(() => {
     setAnnouncementSeen(true);

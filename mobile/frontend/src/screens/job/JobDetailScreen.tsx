@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, Alert, Pressable, Share, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -38,6 +38,20 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [cancelling, setCancelling] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [calling, setCalling] = useState(false);
+  // The footer is absolutely positioned over the ScrollView, and its height varies (poster
+  // vs accepted-worker vs applied, plus the optional Cancel Work row) — a fixed scrollTail
+  // height would inevitably fall out of sync and hide content (e.g. the OTP code) behind it.
+  const [footerHeight, setFooterHeight] = useState(96);
+
+  // This screen has its own bottom action bar (Call/Message/Live Location, or Manage
+  // Applicants) — the floating tab bar sitting on top of it too is what was causing the
+  // Live Location button to look clipped/stuck behind the tab bar. Same pattern as
+  // ChatThreadScreen/SearchScreen: hide the tab bar while this screen is focused.
+  useLayoutEffect(() => {
+    const tabNavigator = navigation.getParent();
+    tabNavigator?.setOptions({ tabBarStyle: { display: 'none' } });
+    return () => tabNavigator?.setOptions({ tabBarStyle: undefined });
+  }, [navigation]);
 
   const fetchJob = useCallback(() => {
     if (!accessToken) return;
@@ -272,10 +286,13 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           ) : null}
         </View>
 
-        <View style={styles.scrollTail} />
+        <View style={{ height: footerHeight }} />
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, theme.spacing.md) }]}>
+      <View
+        style={[styles.footer, { paddingBottom: Math.max(insets.bottom, theme.spacing.md) }]}
+        onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
+      >
         {isPoster ? (
           <Button
             label="Manage Applicants"
@@ -506,10 +523,6 @@ const styles = StyleSheet.create({
     ...theme.typography.caption,
     color: theme.colors.textSecondary,
     marginTop: theme.spacing.lg,
-  },
-  scrollTail: {
-    height: 96,
-    backgroundColor: theme.colors.surface,
   },
   footer: {
     position: 'absolute',

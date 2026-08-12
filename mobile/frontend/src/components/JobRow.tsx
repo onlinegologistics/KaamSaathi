@@ -14,8 +14,10 @@ interface JobRowProps {
 
 // Compact list row used by the job listings — icon tile, copy stack, apply pill.
 export const JobRow: React.FC<JobRowProps> = ({ job, onPress, onApply }) => {
-  const { t, appliedJobIds, categories } = useApp();
+  const { t, currentUser, appliedJobIds, categories } = useApp();
   const hasApplied = appliedJobIds.includes(job.id);
+  const isOwnJob = !!currentUser && job.posterId === currentUser.id;
+  const cannotApply = currentUser?.accountType === 'employer';
   const meta = getCategoryMeta(job.category, categories);
   const handleApply = () => {
     Promise.resolve(onApply()).catch((error) => {
@@ -51,17 +53,23 @@ export const JobRow: React.FC<JobRowProps> = ({ job, onPress, onApply }) => {
         <Text style={styles.pay}>{payLabel}</Text>
       </View>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={hasApplied ? t('applied') : t('applyNow')}
-        onPress={handleApply}
-        disabled={hasApplied}
-        style={({ pressed }) => [styles.applyBtn, hasApplied && styles.applyBtnDone, pressed && !hasApplied && styles.pressed]}
-      >
-        <Text style={[styles.applyText, hasApplied && styles.applyTextDone]}>
-          {hasApplied ? t('applied') : t('applyNow')}
-        </Text>
-      </Pressable>
+      {isOwnJob ? (
+        <View style={[styles.applyBtn, styles.ownJobBadge]}>
+          <Text style={styles.ownJobText}>Your Post</Text>
+        </View>
+      ) : cannotApply ? null : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={hasApplied ? t('applied') : t('applyNow')}
+          onPress={handleApply}
+          disabled={hasApplied}
+          style={({ pressed }) => [styles.applyBtn, hasApplied && styles.applyBtnDone, pressed && !hasApplied && styles.pressed]}
+        >
+          <Text style={[styles.applyText, hasApplied && styles.applyTextDone]}>
+            {hasApplied ? t('applied') : t('applyNow')}
+          </Text>
+        </Pressable>
+      )}
     </Pressable>
   );
 };
@@ -118,6 +126,15 @@ const styles = StyleSheet.create({
   },
   applyBtnDone: {
     backgroundColor: theme.colors.successLight,
+  },
+  ownJobBadge: {
+    backgroundColor: theme.colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  ownJobText: {
+    ...theme.typography.bodyBold,
+    color: theme.colors.textSecondary,
   },
   applyText: {
     ...theme.typography.bodyBold,

@@ -82,4 +82,12 @@ const upsertProfileSchema = Joi.object({
   params: Joi.object({}),
 });
 
-module.exports = { upsertProfileSchema };
+const accountTypeRequestSchema = Joi.object({
+  body: Joi.object({
+    requestedType: Joi.string().valid('worker', 'employer', 'both').required(),
+  }).required(),
+  query: Joi.object({}),
+  params: Joi.object({}),
+});
+
+module.exports = { upsertProfileSchema, accountTypeRequestSchema };

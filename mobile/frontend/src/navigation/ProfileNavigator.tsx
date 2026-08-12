@@ -13,6 +13,10 @@ import { AiAssistantScreen } from '../screens/profile/AiAssistantScreen';
 import { EditProfileScreen } from '../screens/profile/EditProfileScreen';
 import { WalletScreen } from '../screens/profile/WalletScreen';
 import { LiveLocationScreen } from '../screens/job/LiveLocationScreen';
+import { ViewProfileScreen } from '../screens/profile/ViewProfileScreen';
+import { ChatListScreen } from '../screens/profile/ChatListScreen';
+import { ChatThreadScreen } from '../screens/profile/ChatThreadScreen';
+import { AccountTypeScreen } from '../screens/profile/AccountTypeScreen';
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
 
@@ -31,6 +35,10 @@ export const ProfileNavigator: React.FC = () => {
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       <Stack.Screen name="Wallet" component={WalletScreen} />
       <Stack.Screen name="LiveLocation" component={LiveLocationScreen} />
+      <Stack.Screen name="ViewProfile" component={ViewProfileScreen} />
+      <Stack.Screen name="ChatList" component={ChatListScreen} />
+      <Stack.Screen name="ChatThread" component={ChatThreadScreen} />
+      <Stack.Screen name="AccountType" component={AccountTypeScreen} />
     </Stack.Navigator>
   );
 };

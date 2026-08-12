@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Alert, TextInput, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Alert, TextInput, RefreshControl, Pressable } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { theme } from '../../theme';
@@ -90,17 +90,14 @@ export const JobApplicantsDetailScreen: React.FC<Props> = ({ route, navigation }
         Alert.alert('Not available', 'Chat has not started yet.');
         return;
       }
-      navigation.getParent()?.navigate('ChatTab', {
-        screen: 'ChatThread',
-        params: {
-          chatId: res.chat._id,
-          jobId,
-          jobTitle: job?.title ?? '',
-          otherUserId: applicant.userId._id,
-          otherUserName: applicant.userId.name || 'User',
-          otherUserAvatar: applicant.userId.photoUrl,
-        },
-      } as never);
+      navigation.navigate('ChatThread', {
+        chatId: res.chat._id,
+        jobId,
+        jobTitle: job?.title ?? '',
+        otherUserId: applicant.userId._id,
+        otherUserName: applicant.userId.name || 'User',
+        otherUserAvatar: applicant.userId.photoUrl,
+      });
     } catch (e) {
       Alert.alert('Could not open chat', e instanceof Error ? e.message : 'Try again.');
     }
@@ -198,6 +195,7 @@ export const JobApplicantsDetailScreen: React.FC<Props> = ({ route, navigation }
               navigation.navigate('LiveLocation', { jobId, otherUserName: item.userId.name || 'User' })
             }
             onReport={() => setReportUserId(item.userId._id)}
+            onViewProfile={() => navigation.navigate('ViewProfile', { userId: item.userId._id })}
             otpDraft={otpDraft}
             onOtpChange={setOtpDraft}
             onVerifyOtp={handleVerifyOtp}
@@ -233,6 +231,7 @@ const ApplicantRow: React.FC<{
   calling: boolean;
   onLiveLocation: () => void;
   onReport: () => void;
+  onViewProfile: () => void;
   otpDraft: string;
   onOtpChange: (text: string) => void;
   onVerifyOtp: () => void;
@@ -248,6 +247,7 @@ const ApplicantRow: React.FC<{
   calling,
   onLiveLocation,
   onReport,
+  onViewProfile,
   otpDraft,
   onOtpChange,
   onVerifyOtp,
@@ -256,11 +256,25 @@ const ApplicantRow: React.FC<{
 }) => (
   <View style={styles.row}>
     <View style={styles.rowTop}>
-      <Avatar uri={applicant.userId.photoUrl} name={applicant.userId.name || 'User'} size={48} />
-      <View style={styles.rowBody}>
-        <Text style={styles.rowName}>{applicant.userId.name || 'User'}</Text>
-        <Text style={styles.rowMeta}>{applicant.userId.phone}</Text>
-      </View>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onViewProfile}
+        style={({ pressed }) => [styles.rowIdentity, pressed && styles.pressed]}
+      >
+        <Avatar uri={applicant.userId.photoUrl} name={applicant.userId.name || 'User'} size={48} />
+        <View style={styles.rowBody}>
+          <Text style={styles.rowName}>{applicant.userId.name || 'User'}</Text>
+          <Text style={styles.rowMeta}>{applicant.userId.phone}</Text>
+          {applicant.userId.ratingCount > 0 && (
+            <View style={styles.ratingRow}>
+              <MaterialCommunityIcons name="star" size={13} color={theme.colors.accentDark} />
+              <Text style={styles.ratingText}>
+                {applicant.userId.ratingAverage.toFixed(1)} ({applicant.userId.ratingCount})
+              </Text>
+            </View>
+          )}
+        </View>
+      </Pressable>
       {applicant.status === 'applied' && (
         <View style={styles.actions}>
           <Button label="Accept" onPress={onAccept} loading={busy} style={styles.actionBtn} />
@@ -352,6 +366,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.spacing.sm,
   },
+  rowIdentity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    flex: 1,
+  },
+  pressed: {
+    opacity: 0.7,
+  },
   rowBody: {
     flex: 1,
   },
@@ -363,6 +386,17 @@ const styles = StyleSheet.create({
     ...theme.typography.caption,
     color: theme.colors.textSecondary,
     marginTop: 2,
+  },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: 2,
+  },
+  ratingText: {
+    ...theme.typography.tiny,
+    color: theme.colors.accentDark,
+    fontWeight: '700',
   },
   actions: {
     gap: theme.spacing.xs,

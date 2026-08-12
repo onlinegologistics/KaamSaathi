@@ -6,6 +6,7 @@ import { JobDetailScreen } from '../screens/job/JobDetailScreen';
 import { SearchScreen } from '../screens/search/SearchScreen';
 import { ChatThreadScreen } from '../screens/profile/ChatThreadScreen';
 import { LiveLocationScreen } from '../screens/job/LiveLocationScreen';
+import { NotificationsScreen } from '../screens/profile/NotificationsScreen';
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
 
@@ -17,6 +18,7 @@ export const HomeNavigator: React.FC = () => {
       <Stack.Screen name="Search" component={SearchScreen} />
       <Stack.Screen name="ChatThread" component={ChatThreadScreen} />
       <Stack.Screen name="LiveLocation" component={LiveLocationScreen} />
+      <Stack.Screen name="Notifications" component={NotificationsScreen} />
     </Stack.Navigator>
   );
 };

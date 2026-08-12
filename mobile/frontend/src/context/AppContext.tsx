@@ -1,9 +1,12 @@
 import React, { createContext, useContext, useState, useMemo, useCallback, useEffect } from 'react';
+import { Platform } from 'react-native';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { translations, Language, TranslationKey } from '../i18n/translations';
 import { AccountType, CategoryMeta, EmployerProfile, Gender, KycProfile, User, WalletProfile, WorkerProfile } from '../types';
 import {
   BackendUser,
+  BackendNotification,
   TokenPair,
   listCategories as apiListCategories,
   loginWithPassword as apiLoginWithPassword,
@@ -11,16 +14,56 @@ import {
   toCategoryMeta,
   verifyOtp as apiVerifyOtp,
   updateProfile as apiUpdateProfile,
+  requestAccountTypeChange as apiRequestAccountTypeChange,
+  cancelAccountTypeChangeRequest as apiCancelAccountTypeChangeRequest,
   getProfile as apiGetProfile,
   applyToJob as apiApplyToJob,
   cancelAcceptedApplication as apiCancelAcceptedApplication,
   addWalletMoney as apiAddWalletMoney,
   withdrawWalletMoney as apiWithdrawWalletMoney,
+  listNotifications as apiListNotifications,
+  markNotificationRead as apiMarkNotificationRead,
+  markAllNotificationsRead as apiMarkAllNotificationsRead,
 } from '../services/api';
 import { categories as fallbackCategories, categoryGroups as fallbackCategoryGroups } from '../data/categories';
 import { RemoteSettings, fetchRemoteSettings } from '../services/settings';
-import { connectSocket, disconnectSocket } from '../services/socket';
+import { connectSocket, disconnectSocket, getSocket } from '../services/socket';
 import { isKycComplete, isProfileComplete } from '../utils/profileCompletion';
+
+// expo-notifications throws just from being imported under plain Expo Go on Android
+// (SDK 53+) — its remote-push setup runs as a module-level side effect with no opt-out.
+// `StoreClient` covers both Expo Go and a real expo-dev-client build, so the extra
+// `expoVersion` check is what narrows it down to "actually Expo Go" specifically.
+const isExpoGo =
+  Constants.executionEnvironment === ExecutionEnvironment.StoreClient && Constants.expoVersion != null;
+
+type NotificationsModule = typeof import('expo-notifications');
+// eslint-disable-next-line @typescript-eslint/no-var-requires -- must be a lazy require, not a
+// static import, so Expo Go never evaluates this module at all.
+const Notifications: NotificationsModule | null = isExpoGo ? null : require('expo-notifications');
+
+// Foreground display config — without this, a notification received while the app is open
+// never shows a banner (silently dropped). No remote/Expo-push token setup here: that needs
+// an EAS project id this app doesn't have configured yet. This only covers notifications
+// triggered locally (see the `notification:new` socket listener below), which is enough
+// while the app process is alive but not while it's fully closed/killed.
+if (Notifications) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+
+  if (Platform.OS === 'android') {
+    Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.HIGH,
+    }).catch(() => {});
+  }
+}
 
 export type UserMode = 'worker' | 'employer';
 
@@ -60,6 +103,7 @@ const toUser = (backendUser: BackendUser): User => ({
   employerProfile: backendUser.employerProfile,
   kyc: backendUser.kyc,
   wallet: backendUser.wallet,
+  accountTypeChange: backendUser.accountTypeChange,
   verified: backendUser.aadhaarVerification?.isVerified ?? false,
   rating: backendUser.ratingAverage,
   jobsPosted: backendUser.jobsPostedCount,
@@ -115,6 +159,8 @@ interface AppContextValue {
   confirmOtp: (otp: string) => Promise<void>;
   updateProfile: (profile: ProfilePayload) => Promise<void>;
   refreshProfile: () => Promise<void>;
+  requestAccountTypeChange: (requestedType: AccountType) => Promise<void>;
+  cancelAccountTypeChangeRequest: () => Promise<void>;
   addWalletMoney: (amount: number) => Promise<void>;
   withdrawWalletMoney: (amount: number) => Promise<void>;
   logout: () => void;
@@ -136,6 +182,12 @@ interface AppContextValue {
   /** Set once right after a successful OTP verify, cleared when the greeting is dismissed. */
   welcome: { name: string; isNewUser: boolean } | null;
   dismissWelcome: () => void;
+
+  notifications: BackendNotification[];
+  unreadNotificationCount: number;
+  fetchNotifications: () => Promise<void>;
+  markNotificationRead: (notificationId: string) => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
@@ -155,6 +207,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [categories, setCategories] = useState<CategoryMeta[]>(fallbackCategories);
   const [announcementSeen, setAnnouncementSeen] = useState(true);
   const [welcome, setWelcome] = useState<{ name: string; isNewUser: boolean } | null>(null);
+  const [notifications, setNotifications] = useState<BackendNotification[]>([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
 
   useEffect(() => {
     fetchRemoteSettings().then(setRemoteSettings);
@@ -256,6 +310,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [tokens]
   );
 
+  const requestAccountTypeChange = useCallback(
+    async (requestedType: AccountType) => {
+      if (!tokens) throw new Error('Not authenticated');
+      const res = await apiRequestAccountTypeChange(tokens.accessToken, requestedType);
+      setCurrentUser(toUser(res.user));
+    },
+    [tokens]
+  );
+
+  const cancelAccountTypeChangeRequest = useCallback(async () => {
+    if (!tokens) throw new Error('Not authenticated');
+    const res = await apiCancelAccountTypeChangeRequest(tokens.accessToken);
+    setCurrentUser(toUser(res.user));
+  }, [tokens]);
+
   // KYC/wallet approvals happen server-side (an admin acting outside the app), so without
   // this, currentUser silently goes stale until the user's next profile edit or re-login.
   const refreshProfile = useCallback(async () => {
@@ -267,6 +336,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // best-effort — keep whatever we already have rather than blocking the screen
     }
   }, [tokens]);
+
+  const fetchNotifications = useCallback(async () => {
+    if (!tokens) return;
+    try {
+      const res = await apiListNotifications(tokens.accessToken, { limit: 50 });
+      setNotifications(res.data);
+      setUnreadNotificationCount(res.unreadCount);
+    } catch {
+      // best-effort — the notifications screen can retry via pull-to-refresh
+    }
+  }, [tokens]);
+
+  const markNotificationRead = useCallback(
+    async (notificationId: string) => {
+      if (!tokens) return;
+      setNotifications((prev) =>
+        prev.map((n) => (n._id === notificationId ? { ...n, read: true } : n))
+      );
+      setUnreadNotificationCount((prev) => Math.max(0, prev - 1));
+      try {
+        await apiMarkNotificationRead(tokens.accessToken, notificationId);
+      } catch {
+        // local state already flipped; a stale unread badge is a minor inconsistency,
+        // not worth re-fetching/reverting for
+      }
+    },
+    [tokens]
+  );
+
+  const markAllNotificationsRead = useCallback(async () => {
+    if (!tokens) return;
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnreadNotificationCount(0);
+    try {
+      await apiMarkAllNotificationsRead(tokens.accessToken);
+    } catch {
+      // see markNotificationRead
+    }
+  }, [tokens]);
+
+  // Fetch on login + push new ones in live via the same per-user socket room chat already
+  // uses (`user:{userId}`, see mobile/backend/src/socket/index.js). Also fires a local OS
+  // notification so it's visible even if the user isn't looking at the app right now.
+  useEffect(() => {
+    if (!tokens) {
+      setNotifications([]);
+      setUnreadNotificationCount(0);
+      return;
+    }
+
+    Notifications?.requestPermissionsAsync().catch(() => {});
+    fetchNotifications();
+
+    const socket = getSocket();
+    if (!socket) return;
+
+    const onNewNotification = (notification: BackendNotification) => {
+      setNotifications((prev) => [notification, ...prev]);
+      setUnreadNotificationCount((prev) => prev + 1);
+      Notifications?.scheduleNotificationAsync({
+        content: { title: notification.title, body: notification.body, data: notification.data },
+        trigger: null,
+      }).catch(() => {});
+    };
+
+    socket.on('notification:new', onNewNotification);
+    return () => {
+      socket.off('notification:new', onNewNotification);
+    };
+  }, [tokens, fetchNotifications]);
 
   const addWalletMoney = useCallback(
     async (amount: number) => {
@@ -367,6 +506,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       confirmOtp,
       updateProfile,
       refreshProfile,
+      requestAccountTypeChange,
+      cancelAccountTypeChangeRequest,
       addWalletMoney,
       withdrawWalletMoney,
       logout,
@@ -383,6 +524,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dismissAnnouncement,
       welcome,
       dismissWelcome,
+      notifications,
+      unreadNotificationCount,
+      fetchNotifications,
+      markNotificationRead,
+      markAllNotificationsRead,
     }),
     [
       language,
@@ -400,6 +546,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       confirmOtp,
       updateProfile,
       refreshProfile,
+      requestAccountTypeChange,
+      cancelAccountTypeChangeRequest,
       addWalletMoney,
       withdrawWalletMoney,
       logout,
@@ -416,6 +564,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dismissAnnouncement,
       welcome,
       dismissWelcome,
+      notifications,
+      unreadNotificationCount,
+      fetchNotifications,
+      markNotificationRead,
+      markAllNotificationsRead,
     ]
   );
 

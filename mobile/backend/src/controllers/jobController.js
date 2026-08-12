@@ -13,14 +13,15 @@ const { getPagination, paginatedResponse } = require('../utils/pagination');
 const chatService = require('../services/chatService');
 const locationService = require('../services/locationService');
 const pricingService = require('../services/pricingService');
+const notificationService = require('../services/notificationService');
 
 const canManageJob = (user, job) => user.role === 'admin' || job.postedBy.toString() === user._id.toString();
 
 const populateJob = (query) =>
   query
     .populate('postedBy', 'name phone photoUrl ratingAverage ratingCount aadhaarVerification')
-    .populate('acceptedApplicant', 'name phone photoUrl ratingAverage')
-    .populate('applicants.userId', 'name phone photoUrl ratingAverage');
+    .populate('acceptedApplicant', 'name phone photoUrl ratingAverage ratingCount')
+    .populate('applicants.userId', 'name phone photoUrl ratingAverage ratingCount');
 
 const generateWorkerOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
@@ -61,6 +62,20 @@ const requireKyc = (user, message) => {
   throw new ApiError(403, message, 'KYC_REQUIRED');
 };
 
+// accountType gates which side of the marketplace a user can act on — 'worker' never posts,
+// 'employer' never applies, 'both' can do either. Mirrors the tab restructuring in the app.
+const requireCanPost = (user) => {
+  if (user.accountType === 'worker') {
+    throw new ApiError(403, 'Switch your account type to employer or both to post a job', 'ACCOUNT_CANNOT_POST');
+  }
+};
+
+const requireCanApply = (user) => {
+  if (user.accountType === 'employer') {
+    throw new ApiError(403, 'Switch your account type to worker or both to apply to jobs', 'ACCOUNT_CANNOT_APPLY');
+  }
+};
+
 const sanitizeJobForUser = (job, userId) => {
   if (!job) return job;
   const json = typeof job.toJSON === 'function' ? job.toJSON() : job;
@@ -77,6 +92,7 @@ const sanitizeJobForUser = (job, userId) => {
 };
 
 const createJob = asyncHandler(async (req, res) => {
+  requireCanPost(req.user);
   requireKyc(req.user, 'Please complete KYC before posting a job.');
   const { city, area, ...jobFields } = req.body;
   const category = await requireActiveCategory(jobFields.category);
@@ -148,7 +164,7 @@ const listJobs = asyncHandler(async (req, res) => {
 
     await Job.populate(jobs, [
       { path: 'postedBy', select: 'name phone photoUrl ratingAverage ratingCount aadhaarVerification' },
-      { path: 'applicants.userId', select: 'name phone photoUrl ratingAverage' },
+      { path: 'applicants.userId', select: 'name phone photoUrl ratingAverage ratingCount' },
     ]);
 
     const total = totalResult[0]?.total || 0;
@@ -263,6 +279,7 @@ const deleteJob = asyncHandler(async (req, res) => {
 });
 
 const applyToJob = asyncHandler(async (req, res) => {
+  requireCanApply(req.user);
   requireKyc(req.user, 'Please complete KYC before accepting or applying to jobs.');
   const job = await Job.findById(req.params.id);
   if (!job) {
@@ -282,6 +299,16 @@ const applyToJob = asyncHandler(async (req, res) => {
 
   job.applicants.push({ userId: req.user._id });
   await job.save();
+
+  await notificationService.notifyUser({
+    io: req.app.get('io'),
+    userId: job.postedBy,
+    type: 'new_application',
+    title: 'New application received',
+    body: `${req.user.name || 'A worker'} applied to "${job.title}".`,
+    data: { jobId: job._id.toString() },
+  });
+
   const populated = await populateJob(Job.findById(job._id));
   res.status(201).json({ success: true, job: sanitizeJobForUser(populated, req.user._id) });
 });
@@ -363,6 +390,9 @@ const setApplicantStatus = (status) =>
 
     applicant.status = status;
     applicant.updatedAt = new Date();
+    // Everyone else still "applied" loses out the moment one worker is accepted — collect
+    // who, so they can each get a "not this time" notification below (after save()).
+    const autoRejectedApplicantIds = [];
     if (status === 'accepted') {
       job.status = 'in-progress';
       job.acceptedApplicant = applicant.userId;
@@ -375,10 +405,22 @@ const setApplicantStatus = (status) =>
         if (item.userId.toString() !== applicant.userId.toString() && item.status === 'applied') {
           item.status = 'rejected';
           item.updatedAt = new Date();
+          autoRejectedApplicantIds.push(item.userId);
         }
       });
     }
     await job.save();
+
+    if (status === 'rejected') {
+      await notificationService.notifyUser({
+        io: req.app.get('io'),
+        userId: applicant.userId,
+        type: 'application_rejected',
+        title: 'Application not selected',
+        body: `You weren't selected for "${job.title}" this time. Better luck next time!`,
+        data: { jobId: job._id.toString() },
+      });
+    }
 
     if (status === 'accepted') {
       const chat = await chatService.findOrCreateChat({
@@ -398,6 +440,28 @@ const setApplicantStatus = (status) =>
         io.to(`user:${chat.poster}`).emit('thread:updated', { chatId: chat._id.toString() });
         io.to(`user:${chat.applicant}`).emit('thread:updated', { chatId: chat._id.toString() });
       }
+
+      await notificationService.notifyUser({
+        io,
+        userId: applicant.userId,
+        type: 'application_accepted',
+        title: 'Application accepted',
+        body: `Your application for "${job.title}" has been accepted.`,
+        data: { jobId: job._id.toString() },
+      });
+
+      await Promise.all(
+        autoRejectedApplicantIds.map((rejectedUserId) =>
+          notificationService.notifyUser({
+            io,
+            userId: rejectedUserId,
+            type: 'application_rejected',
+            title: 'Application not selected',
+            body: `Someone else was accepted for "${job.title}". Better luck next time!`,
+            data: { jobId: job._id.toString() },
+          })
+        )
+      );
     }
 
     const populated = await populateJob(Job.findById(job._id));

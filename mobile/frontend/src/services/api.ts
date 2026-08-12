@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import type {
   AccountType,
+  AccountTypeChange,
   CategoryMeta,
   EmployerKind,
   Gender,
@@ -129,6 +130,7 @@ export interface BackendUser {
   };
   kyc?: KycProfile;
   wallet?: WalletProfile;
+  accountTypeChange?: AccountTypeChange;
   location?: {
     type: 'Point';
     coordinates?: [number, number];
@@ -173,6 +175,21 @@ export const toCategoryMeta = (category: BackendCategory): CategoryMeta => ({
 
 export const listCategories = () =>
   request<{ success: true; categories: BackendCategory[] }>('/categories');
+
+export interface BackendAd {
+  _id: string;
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+  ctaLabel: string;
+  ctaUrl: string;
+  targetAccountType: AccountType | 'all';
+  isActive: boolean;
+  sortOrder: number;
+}
+
+export const listAds = (accountType?: AccountType) =>
+  request<{ success: true; ads: BackendAd[] }>('/ads', { query: { accountType } });
 
 export const listAdminCategories = (accessToken: string, includeInactive = true) =>
   request<{ success: true; categories: BackendCategory[] }>('/admin/categories', {
@@ -313,6 +330,19 @@ export const updateProfile = (
     },
   });
 
+export const requestAccountTypeChange = (accessToken: string, requestedType: AccountType) =>
+  request<{ success: true; user: BackendUser }>('/users/account-type/request', {
+    method: 'POST',
+    accessToken,
+    body: { requestedType },
+  });
+
+export const cancelAccountTypeChangeRequest = (accessToken: string) =>
+  request<{ success: true; user: BackendUser }>('/users/account-type/request', {
+    method: 'DELETE',
+    accessToken,
+  });
+
 // ---- Wallet ----
 
 export const addWalletMoney = (accessToken: string, amount: number) =>
@@ -334,6 +364,33 @@ export const listWalletTransactions = (accessToken: string, query: { page?: numb
     accessToken,
     query,
   });
+
+export interface PublicProfileReview {
+  _id: string;
+  score: number;
+  comment?: string;
+  createdAt: string;
+  raterName?: string;
+  raterPhotoUrl?: string;
+}
+
+export interface PublicProfile {
+  _id: string;
+  name?: string;
+  photoUrl?: string;
+  accountType?: AccountType;
+  skills: string[];
+  experienceYears?: number;
+  isKycVerified: boolean;
+  ratingAverage: number;
+  ratingCount: number;
+  jobsCompletedCount: number;
+  memberSince: string;
+  reviews: PublicProfileReview[];
+}
+
+export const getPublicProfile = (accessToken: string, userId: string) =>
+  request<{ success: true; profile: PublicProfile }>(`/users/${userId}/profile`, { accessToken });
 
 // ---- Jobs ----
 
@@ -654,4 +711,40 @@ export const submitReport = (
     method: 'POST',
     accessToken,
     body: payload,
+  });
+
+// ---- Notifications ----
+
+export interface BackendNotification {
+  _id: string;
+  type: 'application_accepted' | 'application_rejected' | 'new_application' | 'new_message';
+  title: string;
+  body: string;
+  data: {
+    jobId?: string;
+    chatId?: string;
+    otherUserId?: string;
+    otherUserName?: string;
+    otherUserAvatar?: string;
+  };
+  read: boolean;
+  createdAt: string;
+}
+
+export const listNotifications = (accessToken: string, query: { page?: number; limit?: number } = {}) =>
+  request<{ success: true; data: BackendNotification[]; unreadCount: number; pagination: PaginationMeta }>(
+    '/notifications',
+    { accessToken, query }
+  );
+
+export const markNotificationRead = (accessToken: string, notificationId: string) =>
+  request<{ success: true; notification: BackendNotification }>(`/notifications/${notificationId}/read`, {
+    method: 'POST',
+    accessToken,
+  });
+
+export const markAllNotificationsRead = (accessToken: string) =>
+  request<{ success: true }>('/notifications/read-all', {
+    method: 'POST',
+    accessToken,
   });

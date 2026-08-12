@@ -50,17 +50,14 @@ export const MyApplicationsScreen: React.FC<Props> = ({ navigation }) => {
     if (!accessToken) return;
     const res = await getJobChat(accessToken, job._id);
     if (!res.chat) return;
-    navigation.getParent()?.navigate('ChatTab', {
-      screen: 'ChatThread',
-      params: {
-        chatId: res.chat._id,
-        jobId: job._id,
-        jobTitle: job.title,
-        otherUserId: job.postedBy._id,
-        otherUserName: job.postedBy.name || 'User',
-        otherUserAvatar: job.postedBy.photoUrl,
-      },
-    } as never);
+    navigation.navigate('ChatThread', {
+      chatId: res.chat._id,
+      jobId: job._id,
+      jobTitle: job.title,
+      otherUserId: job.postedBy._id,
+      otherUserName: job.postedBy.name || 'User',
+      otherUserAvatar: job.postedBy.photoUrl,
+    });
   };
 
   const handleCall = async (job: BackendJob) => {

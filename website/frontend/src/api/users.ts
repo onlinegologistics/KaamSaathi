@@ -7,6 +7,7 @@ export interface UserFilters {
   isVerified?: boolean;
   kycStatus?: string;
   walletStatus?: string;
+  accountTypeStatus?: string;
   minRating?: number;
   location?: string;
   page?: number;
@@ -68,5 +69,15 @@ export const approveWallet = async (id: string) => {
 
 export const rejectWallet = async ({ id, reason }: { id: string; reason?: string }) => {
   const { data } = await client.put<{ success: true; user: User }>(`/users/${id}/wallet/reject`, { reason });
+  return data.user;
+};
+
+export const approveAccountTypeChange = async (id: string) => {
+  const { data } = await client.put<{ success: true; user: User }>(`/users/${id}/account-type/approve`);
+  return data.user;
+};
+
+export const rejectAccountTypeChange = async ({ id, reason }: { id: string; reason?: string }) => {
+  const { data } = await client.put<{ success: true; user: User }>(`/users/${id}/account-type/reject`, { reason });
   return data.user;
 };

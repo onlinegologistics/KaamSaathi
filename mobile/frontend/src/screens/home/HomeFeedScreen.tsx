@@ -66,7 +66,11 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
     logout,
     categories,
     categoryGroups,
+    unreadNotificationCount,
   } = useApp();
+  const accountType = currentUser?.accountType ?? 'worker';
+  const canPost = accountType !== 'worker';
+  const canApply = accountType !== 'employer';
   const [categoryGroup, setCategoryGroup] = useState<string | 'all'>('all');
   const [page, setPage] = useState(1);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -74,7 +78,6 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | undefined>();
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
@@ -287,23 +290,25 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Notifications"
-            onPress={() => setNotificationsVisible(true)}
+            onPress={() => navigation.navigate('Notifications')}
             style={styles.headerIconBtn}
           >
             <MaterialCommunityIcons name="bell-outline" size={24} color={theme.colors.text} />
-            <View style={styles.bellDot} />
+            {unreadNotificationCount > 0 ? <View style={styles.bellDot} /> : null}
           </Pressable>
         </View>
 
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('search')}
-          onPress={() => navigation.navigate('Search')}
+          onPress={() =>
+            canApply ? navigation.navigate('Search') : navigation.navigate('ExploreTab', { screen: 'ExploreMain' })
+          }
           style={styles.searchBar}
         >
           <MaterialCommunityIcons name="magnify" size={22} color={theme.colors.primary} />
           <Text style={styles.searchPlaceholder} numberOfLines={1}>
-            Search jobs, skills or people...
+            {canApply ? 'Search jobs, skills or people...' : 'Explore what you can do on AnyWork...'}
           </Text>
           <MaterialCommunityIcons name="map-marker-outline" size={20} color={theme.colors.primary} />
         </Pressable>
@@ -323,15 +328,27 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
                 <Text style={styles.bannerTitleStrong}>Professionals</Text>
                 <Text style={styles.bannerTitle}>For Any Work</Text>
 
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('postJob')}
-                  onPress={() => navigation.navigate('PostTab', { screen: 'PostJob' })}
-                  style={({ pressed }) => [styles.bannerCta, pressed && styles.pressed]}
-                >
-                  <Text style={styles.bannerCtaText}>Post a Job</Text>
-                  <MaterialCommunityIcons name="arrow-right" size={18} color={theme.colors.textInverse} />
-                </Pressable>
+                {canPost ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('postJob')}
+                    onPress={() => navigation.navigate('PostTab', { screen: 'PostJob' })}
+                    style={({ pressed }) => [styles.bannerCta, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.bannerCtaText}>Post a Job</Text>
+                    <MaterialCommunityIcons name="arrow-right" size={18} color={theme.colors.textInverse} />
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('search')}
+                    onPress={() => navigation.navigate('Search')}
+                    style={({ pressed }) => [styles.bannerCta, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.bannerCtaText}>Find Work</Text>
+                    <MaterialCommunityIcons name="arrow-right" size={18} color={theme.colors.textInverse} />
+                  </Pressable>
+                )}
               </View>
 
               <View style={styles.bannerImageWrap}>
@@ -447,45 +464,27 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
         />
       ) : null}
 
-      <Modal
-        visible={notificationsVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setNotificationsVisible(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setNotificationsVisible(false)}>
-          <Pressable style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Notifications</Text>
-              <Pressable accessibilityRole="button" onPress={() => setNotificationsVisible(false)} style={styles.closeButton}>
-                <MaterialCommunityIcons name="close" size={22} color={theme.colors.text} />
-              </Pressable>
-            </View>
-            <NotificationRow
-              icon="briefcase-check-outline"
-              title="New jobs near you"
-              body="Fresh work has been posted around your selected area."
-            />
-            <NotificationRow
-              icon="bell-ring-outline"
-              title="Job alerts are active"
-              body="We will notify you when matching jobs are available."
-            />
-          </Pressable>
-        </Pressable>
-      </Modal>
-
       <Modal visible={menuVisible} transparent animationType="slide" onRequestClose={() => setMenuVisible(false)}>
         <Pressable style={styles.sheetOverlay} onPress={() => setMenuVisible(false)}>
           <Pressable style={styles.menuSheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.menuTitle}>Menu</Text>
+            {canPost && (
+              <MenuAction
+                icon="plus-circle-outline"
+                label="Post a Job"
+                onPress={() => {
+                  setMenuVisible(false);
+                  navigation.navigate('PostTab', { screen: 'PostJob' });
+                }}
+              />
+            )}
             <MenuAction
-              icon="plus-circle-outline"
-              label="Post a Job"
+              icon="compass-outline"
+              label={t('navExplore')}
               onPress={() => {
                 setMenuVisible(false);
-                navigation.navigate('PostTab', { screen: 'PostJob' });
+                navigation.navigate('ExploreTab', { screen: 'ExploreMain' });
               }}
             />
             <MenuAction
@@ -493,7 +492,13 @@ export const HomeFeedScreen: React.FC<Props> = ({ navigation }) => {
               label={t('navChat')}
               onPress={() => {
                 setMenuVisible(false);
-                navigation.navigate('ChatTab', { screen: 'ChatList' });
+                // 'both' accounts have no ChatTab (Explore takes that slot) — Chat is registered
+                // inside the Profile stack for them instead. See MainTabNavigator's hideChatTab.
+                if (accountType === 'both') {
+                  navigation.navigate('ProfileTab', { screen: 'ChatList' });
+                } else {
+                  navigation.navigate('ChatTab', { screen: 'ChatList' });
+                }
               }}
             />
             <MenuAction
@@ -574,22 +579,6 @@ const ProfileIncompleteNotice: React.FC<{
     </View>
     <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.textMuted} />
   </Pressable>
-);
-
-const NotificationRow: React.FC<{ icon: keyof typeof MaterialCommunityIcons.glyphMap; title: string; body: string }> = ({
-  icon,
-  title,
-  body,
-}) => (
-  <View style={styles.notificationRow}>
-    <View style={styles.notificationIcon}>
-      <MaterialCommunityIcons name={icon} size={22} color={theme.colors.primary} />
-    </View>
-    <View style={styles.notificationCopy}>
-      <Text style={styles.notificationTitle}>{title}</Text>
-      <Text style={styles.notificationBody}>{body}</Text>
-    </View>
-  </View>
 );
 
 const MenuAction: React.FC<{
@@ -878,60 +867,6 @@ const styles = StyleSheet.create({
   },
   footerSpace: {
     height: theme.spacing.xl,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: theme.colors.overlay,
-    paddingHorizontal: theme.spacing.lg,
-    justifyContent: 'center',
-  },
-  modalCard: {
-    borderRadius: theme.radius.lg,
-    backgroundColor: theme.colors.surface,
-    padding: theme.spacing.lg,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing.md,
-  },
-  modalTitle: {
-    ...theme.typography.h2,
-    color: theme.colors.text,
-  },
-  closeButton: {
-    width: theme.MIN_TAP_TARGET,
-    height: theme.MIN_TAP_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notificationRow: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-    paddingVertical: theme.spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.divider,
-  },
-  notificationIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: theme.colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notificationCopy: {
-    flex: 1,
-  },
-  notificationTitle: {
-    ...theme.typography.bodyBold,
-    color: theme.colors.text,
-  },
-  notificationBody: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    marginTop: 3,
   },
   sheetOverlay: {
     flex: 1,

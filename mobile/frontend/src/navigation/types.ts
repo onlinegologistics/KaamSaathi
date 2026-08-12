@@ -18,6 +18,7 @@ export type HomeStackParamList = {
   Search: undefined;
   ChatThread: ChatThreadParams;
   LiveLocation: LiveLocationParams;
+  Notifications: undefined;
 };
 
 export type SearchStackParamList = {
@@ -30,6 +31,10 @@ export type SearchStackParamList = {
 export type PostStackParamList = {
   PostJob: undefined;
   PostSuccess: undefined;
+};
+
+export type ExploreStackParamList = {
+  ExploreMain: undefined;
 };
 
 export type ProfileStackParamList = {
@@ -45,6 +50,10 @@ export type ProfileStackParamList = {
   EditProfile: { section?: ProfileEditSection } | undefined;
   Wallet: undefined;
   LiveLocation: LiveLocationParams;
+  ViewProfile: { userId: string };
+  ChatList: undefined;
+  ChatThread: ChatThreadParams;
+  AccountType: undefined;
 };
 
 export type ChatThreadParams = {
@@ -67,6 +76,7 @@ export type MainTabParamList = {
   PostTab: NavigatorScreenParams<PostStackParamList>;
   ChatTab: NavigatorScreenParams<ChatStackParamList>;
   ProfileTab: NavigatorScreenParams<ProfileStackParamList>;
+  ExploreTab: NavigatorScreenParams<ExploreStackParamList>;
 };
 
 export type RootStackParamList = {

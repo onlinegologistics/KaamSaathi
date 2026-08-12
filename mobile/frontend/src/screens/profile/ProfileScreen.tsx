@@ -47,6 +47,10 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const canStartKyc = profileComplete || profilePercent >= KYC_UNLOCK_PROFILE_PERCENT;
   const kycBadge = reviewBadgeFor(currentUser?.kyc?.status);
   const walletBadge = reviewBadgeFor(currentUser?.wallet?.status);
+  const accountTypeLabel = currentUser?.accountType
+    ? currentUser.accountType.charAt(0).toUpperCase() + currentUser.accountType.slice(1)
+    : 'Worker';
+  const accountTypePending = currentUser?.accountTypeChange?.status === 'pending';
 
   useEffect(() => {
     if (!accessToken) return;
@@ -122,6 +126,9 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         </View>
 
         <View style={styles.menuList}>
+          {/* Day-to-day actions first — these are what people actually open Profile for most
+              often. Setup/admin items (Wallet, KYC, Account Type) follow since they're mostly
+              one-time or rare, and Help/Logout close it out. */}
           <SetupStepCard
             icon="account-check-outline"
             tint={theme.colors.primary}
@@ -130,17 +137,6 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             complete={profileComplete}
             statusText={profileComplete ? undefined : `${profilePercent}%`}
             onPress={() => openSetupSection('profile')}
-          />
-          <SetupStepCard
-            icon="wallet-outline"
-            tint={theme.colors.accentDark}
-            title={walletComplete ? 'Wallet' : 'Wallet Setup'}
-            subtitle="Required for money withdrawal"
-            complete={walletComplete}
-            statusText={walletBadge.text}
-            statusColor={walletBadge.color}
-            locked={!kycComplete}
-            onPress={() => openSetupSection('wallet')}
           />
           <MenuCard
             icon="briefcase-outline"
@@ -163,6 +159,26 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             subtitle={`${savedCount} jobs you bookmarked`}
             onPress={() => navigation.navigate('SavedJobs')}
           />
+          {currentUser?.accountType === 'both' && (
+            <MenuCard
+              icon="chat-processing-outline"
+              tint={theme.colors.secondary}
+              title="Messages"
+              subtitle="Chats with employers and workers"
+              onPress={() => navigation.navigate('ChatList')}
+            />
+          )}
+          <SetupStepCard
+            icon="wallet-outline"
+            tint={theme.colors.accentDark}
+            title={walletComplete ? 'Wallet' : 'Wallet Setup'}
+            subtitle="Required for money withdrawal"
+            complete={walletComplete}
+            statusText={walletBadge.text}
+            statusColor={walletBadge.color}
+            locked={!kycComplete}
+            onPress={() => openSetupSection('wallet')}
+          />
           <SetupStepCard
             icon="shield-check-outline"
             tint={theme.colors.secondary}
@@ -173,6 +189,17 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             statusColor={kycBadge.color}
             locked={!canStartKyc}
             onPress={() => openSetupSection('kyc')}
+          />
+          <MenuCard
+            icon="account-convert-outline"
+            tint={theme.colors.secondary}
+            title="Account Type"
+            subtitle={
+              accountTypePending
+                ? 'Change request pending admin approval'
+                : `${accountTypeLabel} · tap to request a change`
+            }
+            onPress={() => navigation.navigate('AccountType')}
           />
           <MenuCard
             icon="help-circle-outline"

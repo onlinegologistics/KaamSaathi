@@ -1,6 +1,7 @@
 const { verifyAccessToken } = require('../middleware/auth');
 const chatService = require('../services/chatService');
 const locationService = require('../services/locationService');
+const notificationService = require('../services/notificationService');
 const Chat = require('../models/Chat');
 
 const locationRoom = (jobId) => `job:${jobId}:location`;
@@ -47,6 +48,25 @@ const attachSocket = (io) => {
         io.to(`chat:${chat._id}`).emit('message:new', message);
         io.to(`user:${chat.poster}`).emit('thread:updated', { chatId: chat._id.toString() });
         io.to(`user:${chat.applicant}`).emit('thread:updated', { chatId: chat._id.toString() });
+
+        const recipientId = chat.poster.toString() === socket.user._id.toString() ? chat.applicant : chat.poster;
+        notificationService
+          .notifyUser({
+            io,
+            userId: recipientId,
+            type: 'new_message',
+            title: 'New message',
+            body: `${socket.user.name || 'Someone'} sent you a message.`,
+            data: {
+              chatId: chat._id.toString(),
+              jobId: chat.job.toString(),
+              otherUserId: socket.user._id.toString(),
+              otherUserName: socket.user.name || 'User',
+              otherUserAvatar: socket.user.photoUrl || undefined,
+            },
+          })
+          .catch(() => {});
+
         ack?.({ ok: true, message });
       } catch (error) {
         ack?.({ ok: false, error: error.code || error.message || 'SEND_MESSAGE_FAILED' });

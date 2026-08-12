@@ -9,6 +9,8 @@ const settingRoutes = require('./settingRoutes');
 const placesRoutes = require('./placesRoutes');
 const categoryRoutes = require('./categoryRoutes');
 const reportRoutes = require('./reportRoutes');
+const notificationRoutes = require('./notificationRoutes');
+const adRoutes = require('./adRoutes');
 
 const router = express.Router();
 
@@ -22,5 +24,7 @@ router.use('/settings', settingRoutes);
 router.use('/places', placesRoutes);
 router.use('/categories', categoryRoutes);
 router.use('/reports', reportRoutes);
+router.use('/notifications', notificationRoutes);
+router.use('/ads', adRoutes);
 
 module.exports = router;

@@ -99,6 +99,12 @@ const profilePayload = async (body, user) => {
     payload.passwordHash = await bcrypt.hash(body.password, env.bcryptSaltRounds);
   }
   delete payload.password;
+  // accountType is only settable on this endpoint during the very first profile submission
+  // (requireRegistrationFields uses the same !user.name check to detect that moment). Once an
+  // account exists, changing it requires an admin-approved request — see requestAccountTypeChange.
+  if (user.name) {
+    delete payload.accountType;
+  }
   return payload;
 };
 
@@ -120,6 +126,41 @@ const updateProfile = asyncHandler(async (req, res) => {
   res.json({ success: true, user });
 });
 
+const requestAccountTypeChange = asyncHandler(async (req, res) => {
+  const { requestedType } = req.body;
+  const user = req.user;
+
+  if (requestedType === user.accountType) {
+    throw new ApiError(422, 'That is already your current account type', 'ACCOUNT_TYPE_UNCHANGED');
+  }
+  if (user.accountTypeChange?.status === 'pending') {
+    throw new ApiError(409, 'You already have a pending account type request', 'ACCOUNT_TYPE_REQUEST_PENDING');
+  }
+
+  user.accountTypeChange = {
+    requestedType,
+    status: 'pending',
+    requestedAt: new Date(),
+    reviewedAt: undefined,
+    rejectionReason: '',
+  };
+  await user.save();
+
+  res.json({ success: true, user });
+});
+
+const cancelAccountTypeChangeRequest = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (user.accountTypeChange?.status !== 'pending') {
+    throw new ApiError(400, 'No pending account type request to cancel', 'ACCOUNT_TYPE_REQUEST_NOT_PENDING');
+  }
+
+  user.accountTypeChange = { status: 'none' };
+  await user.save();
+
+  res.json({ success: true, user });
+});
+
 const getUserRating = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.id).select('name phone ratingAverage ratingCount jobsCompletedCount');
   if (!user) {
@@ -137,6 +178,45 @@ const getUserRating = asyncHandler(async (req, res) => {
       average: user.ratingAverage,
       count: user.ratingCount,
       latest: latestRatings,
+    },
+  });
+});
+
+const getPublicProfile = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.id).select(
+    'name photoUrl accountType workerProfile kyc.status ratingAverage ratingCount jobsCompletedCount createdAt'
+  );
+  if (!user) {
+    throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+  }
+
+  const latestRatings = await Rating.find({ ratedUser: user._id })
+    .sort({ createdAt: -1 })
+    .limit(10)
+    .populate('ratedBy', 'name photoUrl');
+
+  res.json({
+    success: true,
+    profile: {
+      _id: user._id,
+      name: user.name,
+      photoUrl: user.photoUrl,
+      accountType: user.accountType,
+      skills: user.workerProfile?.skills ?? [],
+      experienceYears: user.workerProfile?.experienceYears,
+      isKycVerified: user.kyc?.status === 'verified',
+      ratingAverage: user.ratingAverage,
+      ratingCount: user.ratingCount,
+      jobsCompletedCount: user.jobsCompletedCount,
+      memberSince: user.createdAt,
+      reviews: latestRatings.map((rating) => ({
+        _id: rating._id,
+        score: rating.score,
+        comment: rating.comment,
+        createdAt: rating.createdAt,
+        raterName: rating.ratedBy?.name,
+        raterPhotoUrl: rating.ratedBy?.photoUrl,
+      })),
     },
   });
 });
@@ -206,7 +286,10 @@ module.exports = {
   getProfile,
   upsertProfile,
   updateProfile,
+  requestAccountTypeChange,
+  cancelAccountTypeChangeRequest,
   getUserRating,
+  getPublicProfile,
   addMoney,
   requestWithdrawal,
   listWalletTransactions,

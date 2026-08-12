@@ -245,6 +245,40 @@ const walletSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Account type can only be set directly at registration (see requireRegistrationFields /
+// profilePayload in userController.js). Any change after that goes through this request,
+// which an admin must approve before `accountType` itself is updated.
+const accountTypeChangeSchema = new mongoose.Schema(
+  {
+    requestedType: {
+      type: String,
+      enum: ['worker', 'employer', 'both'],
+      default: undefined,
+    },
+    status: {
+      type: String,
+      enum: ['none', 'pending', 'approved', 'rejected'],
+      default: 'none',
+      index: true,
+    },
+    requestedAt: {
+      type: Date,
+      default: undefined,
+    },
+    reviewedAt: {
+      type: Date,
+      default: undefined,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      maxlength: 300,
+      default: '',
+    },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -328,6 +362,10 @@ const userSchema = new mongoose.Schema(
     },
     wallet: {
       type: walletSchema,
+      default: () => ({}),
+    },
+    accountTypeChange: {
+      type: accountTypeChangeSchema,
       default: () => ({}),
     },
     location: {

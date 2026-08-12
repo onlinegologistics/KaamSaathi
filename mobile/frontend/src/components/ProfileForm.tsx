@@ -214,6 +214,17 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
     });
     return Array.from(groups.entries()).map(([key, group]) => ({ key, ...group }));
   }, [categories]);
+  // Collapsed by default so the 4 main categories read as a tidy list rather than every
+  // sub-category dumped on screen at once — a group auto-opens if it already has a pick in it
+  // (e.g. re-opening this form later) so existing selections aren't hidden from view.
+  const [expandedCategoryGroups, setExpandedCategoryGroups] = useState<string[]>(() =>
+    categoryGroups
+      .filter((group) => group.items.some((item) => preferredWorkCategories.includes(item.key)))
+      .map((group) => group.key)
+  );
+  const toggleCategoryGroup = (key: string) => {
+    setExpandedCategoryGroups((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  };
   const requiredCategoryDocuments = useMemo(
     () =>
       Array.from(new Set(showWorkerProfile ? preferredWorkCategories : [])).map((category) => {
@@ -569,8 +580,10 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
         </>
       ) : null}
 
-      {showCoreFields ? (
+      {showCoreFields && !initialUser ? (
         <>
+          {/* Only shown at registration — once an account exists, its type can only change
+              via an admin-approved request (see AccountTypeScreen), not this form. */}
           <Text style={styles.sectionLabel}>{t('selectAccountType')}</Text>
           <View style={styles.accountTypeRow}>
             {(['worker', 'employer', 'both'] as AccountType[]).map((type) => (
@@ -639,34 +652,59 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
           />
           <Text style={styles.sectionLabel}>Preferred Work Category</Text>
           <View style={styles.categoryGroupList}>
-            {categoryGroups.map((group) => (
-              <View key={group.key} style={styles.categoryGroupBlock}>
-                <Text style={styles.categoryGroupTitle}>{group.name}</Text>
-                <View style={styles.optionRow}>
-                  {group.items.map((category) => {
-                    const selected = preferredWorkCategories.includes(category.key);
-                    return (
-                      <Pressable
-                        key={category.key}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected }}
-                        onPress={() => togglePreferredCategory(category.key)}
-                        style={[styles.optionButton, selected && styles.optionButtonActive]}
-                      >
-                        <MaterialCommunityIcons
-                          name={category.icon as keyof typeof MaterialCommunityIcons.glyphMap}
-                          size={16}
-                          color={selected ? theme.colors.textInverse : theme.colors.textSecondary}
-                        />
-                        <Text style={[styles.optionLabel, selected && styles.optionLabelActive]}>
-                          {category.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
+            {categoryGroups.map((group) => {
+              const expanded = expandedCategoryGroups.includes(group.key);
+              const selectedCount = group.items.filter((item) =>
+                preferredWorkCategories.includes(item.key)
+              ).length;
+              return (
+                <View key={group.key} style={styles.categoryGroupBlock}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded }}
+                    onPress={() => toggleCategoryGroup(group.key)}
+                    style={({ pressed }) => [styles.categoryGroupHeader, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.categoryGroupTitle}>{group.name}</Text>
+                    {selectedCount > 0 ? (
+                      <View style={styles.categoryGroupCount}>
+                        <Text style={styles.categoryGroupCountText}>{selectedCount}</Text>
+                      </View>
+                    ) : null}
+                    <MaterialCommunityIcons
+                      name={expanded ? 'chevron-up' : 'chevron-down'}
+                      size={22}
+                      color={theme.colors.textMuted}
+                    />
+                  </Pressable>
+                  {expanded ? (
+                    <View style={[styles.optionRow, styles.categoryGroupOptions]}>
+                      {group.items.map((category) => {
+                        const selected = preferredWorkCategories.includes(category.key);
+                        return (
+                          <Pressable
+                            key={category.key}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected }}
+                            onPress={() => togglePreferredCategory(category.key)}
+                            style={[styles.optionButton, selected && styles.optionButtonActive]}
+                          >
+                            <MaterialCommunityIcons
+                              name={category.icon as keyof typeof MaterialCommunityIcons.glyphMap}
+                              size={16}
+                              color={selected ? theme.colors.textInverse : theme.colors.textSecondary}
+                            />
+                            <Text style={[styles.optionLabel, selected && styles.optionLabelActive]}>
+                              {category.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : null}
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
           <Input
             label="Work Radius"
@@ -1056,12 +1094,43 @@ const styles = StyleSheet.create({
   },
   categoryGroupBlock: {
     marginBottom: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surface,
+    overflow: 'hidden',
+  },
+  categoryGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    minHeight: 52,
+    paddingHorizontal: theme.spacing.md,
+  },
+  categoryGroupCount: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    backgroundColor: theme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryGroupCountText: {
+    ...theme.typography.tiny,
+    color: theme.colors.textInverse,
+    fontWeight: '800',
   },
   categoryGroupTitle: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
+    ...theme.typography.body,
+    color: theme.colors.text,
     fontWeight: '800',
-    marginBottom: theme.spacing.xs,
+    flex: 1,
+  },
+  categoryGroupOptions: {
+    paddingHorizontal: theme.spacing.md,
+    paddingBottom: theme.spacing.md,
+    marginBottom: 0,
   },
   optionButton: {
     minHeight: 42,

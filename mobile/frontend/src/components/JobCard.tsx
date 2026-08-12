@@ -27,9 +27,13 @@ const startLabel = (job: Job) => {
 };
 
 export const JobCard: React.FC<JobCardProps> = ({ job, onPress, onApply }) => {
-  const { t, bookmarkedJobIds, toggleBookmark, appliedJobIds } = useApp();
+  const { t, currentUser, bookmarkedJobIds, toggleBookmark, appliedJobIds } = useApp();
   const isBookmarked = bookmarkedJobIds.includes(job.id);
   const hasApplied = appliedJobIds.includes(job.id);
+  const isOwnJob = !!currentUser && job.posterId === currentUser.id;
+  // Employer-only accounts never apply to jobs at all (not just their own) — see the
+  // accountType-driven tab restructuring in MainTabNavigator for the rest of this rule.
+  const cannotApply = currentUser?.accountType === 'employer';
 
   const payLabel =
     job.payType === 'fixed' ? `\u20b9${job.pay}` : `\u20b9${job.pay}${job.payType === 'day' ? t('perDay') : t('perHour')}`;
@@ -94,20 +98,27 @@ export const JobCard: React.FC<JobCardProps> = ({ job, onPress, onApply }) => {
       </View>
 
       <View style={styles.actionRow}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={hasApplied ? t('applied') : t('applyNow')}
-          onPress={handleApply}
-          disabled={hasApplied}
-          style={({ pressed }) => [
-            styles.applyBtn,
-            hasApplied && styles.applyBtnDone,
-            pressed && !hasApplied && styles.pressed,
-          ]}
-        >
-          <MaterialCommunityIcons name={hasApplied ? 'check-circle' : 'send'} size={18} color={theme.colors.textInverse} />
-          <Text style={styles.applyText}>{hasApplied ? t('applied') : t('applyNow')}</Text>
-        </Pressable>
+        {isOwnJob ? (
+          <View style={[styles.applyBtn, styles.ownJobBadge]}>
+            <MaterialCommunityIcons name="briefcase-account-outline" size={18} color={theme.colors.textSecondary} />
+            <Text style={styles.ownJobText}>Your Job Post</Text>
+          </View>
+        ) : cannotApply ? null : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={hasApplied ? t('applied') : t('applyNow')}
+            onPress={handleApply}
+            disabled={hasApplied}
+            style={({ pressed }) => [
+              styles.applyBtn,
+              hasApplied && styles.applyBtnDone,
+              pressed && !hasApplied && styles.pressed,
+            ]}
+          >
+            <MaterialCommunityIcons name={hasApplied ? 'check-circle' : 'send'} size={18} color={theme.colors.textInverse} />
+            <Text style={styles.applyText}>{hasApplied ? t('applied') : t('applyNow')}</Text>
+          </Pressable>
+        )}
 
         <Pressable
           accessibilityRole="button"
@@ -254,6 +265,15 @@ const styles = StyleSheet.create({
   },
   applyBtnDone: {
     backgroundColor: theme.colors.success,
+  },
+  ownJobBadge: {
+    backgroundColor: theme.colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  ownJobText: {
+    ...theme.typography.button,
+    color: theme.colors.textSecondary,
   },
   applyText: {
     ...theme.typography.button,

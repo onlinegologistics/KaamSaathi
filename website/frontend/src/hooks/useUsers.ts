@@ -63,3 +63,19 @@ export const useRejectWallet = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
   });
 };
+
+export const useApproveAccountTypeChange = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: usersApi.approveAccountTypeChange,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+};
+
+export const useRejectAccountTypeChange = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: usersApi.rejectAccountTypeChange,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+};

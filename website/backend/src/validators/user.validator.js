@@ -8,6 +8,7 @@ const listUsersSchema = Joi.object({
     isVerified: Joi.boolean(),
     kycStatus: Joi.string().valid('not_started', 'submitted', 'verified', 'rejected'),
     walletStatus: Joi.string().valid('not_started', 'submitted', 'verified', 'rejected'),
+    accountTypeStatus: Joi.string().valid('none', 'pending', 'approved', 'rejected'),
     minRating: Joi.number().min(0).max(5),
     location: Joi.string().trim().max(300),
     ...pagination,

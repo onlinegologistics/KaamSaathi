@@ -94,7 +94,7 @@ export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
     <ScreenContainer backgroundColor="#FFFDF8">
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.screen}>
           <LinearGradient

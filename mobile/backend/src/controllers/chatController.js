@@ -3,6 +3,7 @@ const Message = require('../models/Message');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
 const chatService = require('../services/chatService');
+const notificationService = require('../services/notificationService');
 const { getPagination, paginatedResponse } = require('../utils/pagination');
 
 const populateThread = (query) =>
@@ -70,6 +71,24 @@ const sendMessage = asyncHandler(async (req, res) => {
     io.to(`user:${chat.poster}`).emit('thread:updated', { chatId: chat._id.toString() });
     io.to(`user:${chat.applicant}`).emit('thread:updated', { chatId: chat._id.toString() });
   }
+
+  const recipientId = chat.poster.toString() === req.user._id.toString() ? chat.applicant : chat.poster;
+  notificationService
+    .notifyUser({
+      io,
+      userId: recipientId,
+      type: 'new_message',
+      title: 'New message',
+      body: `${req.user.name || 'Someone'} sent you a message.`,
+      data: {
+        chatId: chat._id.toString(),
+        jobId: chat.job.toString(),
+        otherUserId: req.user._id.toString(),
+        otherUserName: req.user.name || 'User',
+        otherUserAvatar: req.user.photoUrl || undefined,
+      },
+    })
+    .catch(() => {});
 
   res.status(201).json({ success: true, message });
 });

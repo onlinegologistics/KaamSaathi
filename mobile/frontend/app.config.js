@@ -24,6 +24,12 @@ module.exports = {
     },
     android: {
       package: 'com.kaamsaathi.app',
+      // Built APKs don't reliably auto-resize behind the keyboard the way Expo Go's host
+      // activity does (edge-to-edge changes how the window responds to windowSoftInputMode) —
+      // being explicit here plus KeyboardAvoidingView's Android "height" behavior (see chat/AI
+      // assistant/phone-entry screens) is what actually pushes the input row above the keyboard
+      // in a release build, not just in Expo Go.
+      softwareKeyboardLayoutMode: 'resize',
       adaptiveIcon: {
         backgroundColor: '#E4622A',
         foregroundImage: './assets/android-icon-foreground.png',
@@ -63,6 +69,12 @@ module.exports = {
         {
           androidGoogleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY_ANDROID,
           iosGoogleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY_IOS,
+        },
+      ],
+      [
+        'expo-notifications',
+        {
+          color: '#F45B18',
         },
       ],
     ],

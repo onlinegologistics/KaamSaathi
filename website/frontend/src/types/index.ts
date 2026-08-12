@@ -66,6 +66,14 @@ export interface WalletProfile {
   rejectionReason?: string;
 }
 
+export interface AccountTypeChange {
+  requestedType?: 'worker' | 'employer' | 'both';
+  status: 'none' | 'pending' | 'approved' | 'rejected';
+  requestedAt?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+}
+
 export interface User {
   _id: string;
   name?: string;
@@ -77,6 +85,7 @@ export interface User {
   aadhaarVerification: AadhaarVerification;
   kyc?: KycProfile;
   wallet?: WalletProfile;
+  accountTypeChange?: AccountTypeChange;
   ratingAverage: number;
   ratingCount: number;
   jobsCompletedCount: number;
@@ -122,6 +131,20 @@ export interface Category {
   icon: string;
   color: string;
   kycDocumentLabel?: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Ad {
+  _id: string;
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+  ctaLabel: string;
+  ctaUrl: string;
+  targetAccountType: 'worker' | 'employer' | 'both' | 'all';
   isActive: boolean;
   sortOrder: number;
   createdAt: string;

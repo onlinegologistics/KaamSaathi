@@ -1,21 +1,6 @@
 import { BackendJob } from '../services/api';
 import { Job, JobCategory } from '../types';
-
-const EARTH_RADIUS_KM = 6371;
-
-const toRad = (deg: number) => (deg * Math.PI) / 180;
-
-const haversineKm = (
-  from: { latitude: number; longitude: number },
-  to: { latitude: number; longitude: number }
-): number => {
-  const dLat = toRad(to.latitude - from.latitude);
-  const dLon = toRad(to.longitude - from.longitude);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(from.latitude)) * Math.cos(toRad(to.latitude)) * Math.sin(dLon / 2) ** 2;
-  return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
+import { haversineKm } from './geo';
 
 const isSameCalendarDay = (isoDate: string) => {
   const d = new Date(isoDate);

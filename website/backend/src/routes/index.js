@@ -10,6 +10,7 @@ const transactionRoutes = require('./transactionRoutes');
 const payoutRoutes = require('./payoutRoutes');
 const walletTransactionRoutes = require('./walletTransactionRoutes');
 const pricingRoutes = require('./pricingRoutes');
+const adRoutes = require('./adRoutes');
 
 const router = express.Router();
 
@@ -24,5 +25,6 @@ router.use('/transactions', transactionRoutes);
 router.use('/payouts', payoutRoutes);
 router.use('/wallet', walletTransactionRoutes);
 router.use('/pricing', pricingRoutes);
+router.use('/ads', adRoutes);
 
 module.exports = router;

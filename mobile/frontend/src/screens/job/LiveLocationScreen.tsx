@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -11,6 +11,7 @@ import { Button } from '../../components/Button';
 import { useApp } from '../../context/AppContext';
 import { getSocket } from '../../services/socket';
 import { getJobLocations } from '../../services/api';
+import { haversineKm, formatDistance } from '../../utils/geo';
 import type { HomeStackParamList } from '../../navigation/types';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'LiveLocation'>;
@@ -40,6 +41,15 @@ export const LiveLocationScreen: React.FC<Props> = ({ route, navigation }) => {
     null
   );
 
+  // The floating tab bar renders on top of every screen's own layout regardless of flex
+  // flow, so this screen's own bottom action bar needs the tab bar hidden while focused —
+  // same fix as JobDetailScreen/ChatThreadScreen, otherwise it looks clipped/stuck behind it.
+  useLayoutEffect(() => {
+    const tabNavigator = navigation.getParent();
+    tabNavigator?.setOptions({ tabBarStyle: { display: 'none' } });
+    return () => tabNavigator?.setOptions({ tabBarStyle: undefined });
+  }, [navigation]);
+
   // Seed the map with whatever last-known position exists before the first live tick arrives.
   useEffect(() => {
     if (!accessToken) return;
@@ -52,6 +62,8 @@ export const LiveLocationScreen: React.FC<Props> = ({ route, navigation }) => {
       })
       .catch(() => {});
   }, [accessToken, jobId, currentUser?.id]);
+
+  const distanceKm = myLocation && otherLocation ? haversineKm(myLocation, otherLocation) : null;
 
   const stopSharing = useCallback(() => {
     watchRef.current?.remove();
@@ -93,7 +105,7 @@ export const LiveLocationScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, [jobId, currentUser?.id]);
 
-  const startSharing = async () => {
+  const startSharing = useCallback(async () => {
     if (starting || sharing) return;
     setStarting(true);
     try {
@@ -143,7 +155,15 @@ export const LiveLocationScreen: React.FC<Props> = ({ route, navigation }) => {
     } finally {
       setStarting(false);
     }
-  };
+  }, [starting, sharing, jobId, stopSharing]);
+
+  // Auto-start sharing as soon as this screen opens (both poster and worker land here only for
+  // an active job's Call/Message/Location action), so each side sees the other's live position
+  // without an extra manual tap — "Stop Sharing" remains for anyone who wants to pause it.
+  useEffect(() => {
+    startSharing();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const initialRegion = {
     ...(myLocation ?? otherLocation ?? DEFAULT_CENTER),
@@ -157,6 +177,15 @@ export const LiveLocationScreen: React.FC<Props> = ({ route, navigation }) => {
         <IconButton name="arrow-left" accessibilityLabel="Back" onPress={() => navigation.goBack()} />
         <Text style={styles.headerTitle}>Live Location</Text>
       </View>
+
+      {distanceKm !== null && (
+        <View style={styles.distanceBanner}>
+          <MaterialCommunityIcons name="map-marker-distance" size={18} color={theme.colors.primary} />
+          <Text style={styles.distanceText}>
+            {otherUserName} is {formatDistance(distanceKm)} away from you
+          </Text>
+        </View>
+      )}
 
       <View style={styles.mapWrap}>
         <MapView ref={mapRef} style={styles.map} provider={PROVIDER_GOOGLE} initialRegion={initialRegion}>
@@ -211,6 +240,23 @@ const styles = StyleSheet.create({
   headerTitle: {
     ...theme.typography.h2,
     color: theme.colors.text,
+  },
+  distanceBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+    backgroundColor: theme.colors.primaryLight,
+    borderRadius: theme.radius.md,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+  },
+  distanceText: {
+    ...theme.typography.caption,
+    color: theme.colors.primaryDark,
+    fontWeight: '700',
+    flex: 1,
   },
   mapWrap: {
     flex: 1,

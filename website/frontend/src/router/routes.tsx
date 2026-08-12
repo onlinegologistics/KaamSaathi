@@ -5,6 +5,7 @@ import { LoginPage } from '@/pages/LoginPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { JobModerationPage } from '@/pages/admin/JobModerationPage';
 import { CategoriesPage } from '@/pages/admin/CategoriesPage';
+import { AdsPage } from '@/pages/admin/AdsPage';
 import { PricingPage } from '@/pages/admin/PricingPage';
 import { ApprovalsPage } from '@/pages/admin/ApprovalsPage';
 import { ReportsQueuePage } from '@/pages/admin/ReportsQueuePage';
@@ -26,6 +27,7 @@ export const router = createBrowserRouter([
           { path: '/', element: <DashboardPage /> },
           { path: '/jobs', element: <JobModerationPage /> },
           { path: '/categories', element: <CategoriesPage /> },
+          { path: '/ads', element: <AdsPage /> },
           { path: '/pricing', element: <PricingPage /> },
           { path: '/approvals', element: <ApprovalsPage /> },
           { path: '/reports', element: <ReportsQueuePage /> },

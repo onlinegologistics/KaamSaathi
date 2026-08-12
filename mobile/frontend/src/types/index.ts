@@ -53,6 +53,14 @@ export interface WalletProfile {
   rejectionReason?: string;
 }
 
+export interface AccountTypeChange {
+  requestedType?: AccountType;
+  status: 'none' | 'pending' | 'approved' | 'rejected';
+  requestedAt?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+}
+
 export interface WalletTransaction {
   _id: string;
   type: 'credit' | 'debit';
@@ -80,6 +88,7 @@ export interface User {
   employerProfile?: EmployerProfile;
   kyc?: KycProfile;
   wallet?: WalletProfile;
+  accountTypeChange?: AccountTypeChange;
   verified: boolean;
   rating: number;
   jobsPosted: number;

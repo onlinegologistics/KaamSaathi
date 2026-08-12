@@ -140,6 +140,7 @@ export const translations = {
     navPost: 'Post',
     navChat: 'Messages',
     navProfile: 'Profile',
+    navExplore: 'Explore',
 
     // Profile
     myProfile: 'My Profile',
@@ -286,6 +287,7 @@ export const translations = {
     navPost: 'पोस्ट',
     navChat: 'संदेश',
     navProfile: 'प्रोफ़ाइल',
+    navExplore: 'एक्सप्लोर',
 
     myProfile: 'मेरी प्रोफ़ाइल',
     editProfile: 'प्रोफ़ाइल संपादित करें',

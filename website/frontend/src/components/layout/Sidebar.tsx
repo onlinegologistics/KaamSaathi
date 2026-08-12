@@ -13,6 +13,7 @@ import {
   Users,
   ChevronDown,
   IndianRupee,
+  Megaphone,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -23,6 +24,7 @@ const navSections = [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
       { to: '/jobs', label: 'Job Moderation', icon: Briefcase },
       { to: '/categories', label: 'Categories', icon: Tags },
+      { to: '/ads', label: 'Ads', icon: Megaphone },
       { to: '/pricing', label: 'Minimum Pricing', icon: IndianRupee },
       { to: '/approvals', label: 'Approvals', icon: ShieldCheck },
       { to: '/reports', label: 'Reported Content', icon: Flag },

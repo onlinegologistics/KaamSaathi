@@ -17,5 +17,7 @@ router.put('/:id/kyc/approve', validate(userIdSchema), userController.approveKyc
 router.put('/:id/kyc/reject', validate(userRejectSchema), userController.rejectKyc);
 router.put('/:id/wallet/approve', validate(userIdSchema), userController.approveWallet);
 router.put('/:id/wallet/reject', validate(userRejectSchema), userController.rejectWallet);
+router.put('/:id/account-type/approve', validate(userIdSchema), userController.approveAccountTypeChange);
+router.put('/:id/account-type/reject', validate(userRejectSchema), userController.rejectAccountTypeChange);
 
 module.exports = router;

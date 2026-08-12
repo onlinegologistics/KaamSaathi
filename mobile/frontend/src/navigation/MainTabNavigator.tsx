@@ -10,6 +10,7 @@ import { SearchNavigator } from './SearchNavigator';
 import { PostNavigator } from './PostNavigator';
 import { ChatNavigator } from './ChatNavigator';
 import { ProfileNavigator } from './ProfileNavigator';
+import { ExploreNavigator } from './ExploreNavigator';
 import { useApp } from '../context/AppContext';
 
 // Note: screens that need the tab bar hidden while they're focused (Home's
@@ -26,6 +27,7 @@ const icons: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
   SearchTab: 'magnify',
   ChatTab: 'chat-processing',
   ProfileTab: 'account-circle',
+  ExploreTab: 'compass-outline',
 };
 
 const labelKeys: Record<string, 'navHome' | 'navSearch' | 'navChat' | 'navProfile'> = {
@@ -37,7 +39,29 @@ const labelKeys: Record<string, 'navHome' | 'navSearch' | 'navChat' | 'navProfil
 
 export const MainTabNavigator: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const { t } = useApp();
+  const { t, currentUser } = useApp();
+  // Backend defaults a fresh account to 'worker' until they explicitly change it, so mirror
+  // that here rather than showing every tab (which would let a not-yet-configured account post
+  // AND apply before they've picked a role).
+  const accountType = currentUser?.accountType ?? 'worker';
+  // Neither role gets a spare tab slot to dedicate to Explore, so it always takes over whichever
+  // capability that role doesn't have: Post for workers, Search for employers. 'both' has every
+  // capability, so Explore instead replaces the Chat tab entirely — Chat/ChatList/ChatThread are
+  // also registered inside ProfileStackParamList (see ProfileNavigator) so "Message" actions and
+  // the Profile "Messages" menu still work without this tab existing. (Earlier this used a
+  // tabBarButton:null hack to hide Chat while keeping it mounted, but a hidden tab still reserves
+  // its flex slot in the tab bar row, which visibly squeezed the other 5 icons — omitting the
+  // Tab.Screen entirely, like Search/Post do, is the only way to actually free the slot.)
+  const hideSearchTab = accountType === 'employer';
+  const hidePostTab = accountType === 'worker';
+  const hideChatTab = accountType === 'both';
+
+  const exploreTabOptions = {
+    tabBarLabel: t('navExplore'),
+    tabBarIcon: ({ color, size }: { color: string; size: number }) => (
+      <MaterialCommunityIcons name={icons.ExploreTab} size={size} color={color} />
+    ),
+  };
 
   const baseTabBarStyle = {
     position: 'absolute' as const,
@@ -75,31 +99,43 @@ export const MainTabNavigator: React.FC = () => {
           tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name={icons.HomeTab} size={size} color={color} />,
         }}
       />
-      <Tab.Screen
-        name="SearchTab"
-        component={SearchNavigator}
-        options={{
-          tabBarLabel: t('navSearch'),
-          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name={icons.SearchTab} size={size} color={color} />,
-        }}
-      />
-      <Tab.Screen
-        name="PostTab"
-        component={PostNavigator}
-        options={{
-          tabBarLabel: () => null,
-          tabBarIcon: ({ focused }) => <PostTabIcon focused={focused} label={t('navPost')} />,
-        }}
-      />
-      <Tab.Screen
-        name="ChatTab"
-        component={ChatNavigator}
-        options={{
-          tabBarLabel: t('navChat'),
-          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name={icons.ChatTab} size={size} color={color} />,
-          tabBarBadge: undefined,
-        }}
-      />
+      {hideSearchTab ? (
+        <Tab.Screen name="ExploreTab" component={ExploreNavigator} options={exploreTabOptions} />
+      ) : (
+        <Tab.Screen
+          name="SearchTab"
+          component={SearchNavigator}
+          options={{
+            tabBarLabel: t('navSearch'),
+            tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name={icons.SearchTab} size={size} color={color} />,
+          }}
+        />
+      )}
+      {hidePostTab ? (
+        <Tab.Screen name="ExploreTab" component={ExploreNavigator} options={exploreTabOptions} />
+      ) : (
+        <Tab.Screen
+          name="PostTab"
+          component={PostNavigator}
+          options={{
+            tabBarLabel: () => null,
+            tabBarIcon: ({ focused }) => <PostTabIcon focused={focused} label={t('navPost')} />,
+          }}
+        />
+      )}
+      {hideChatTab ? (
+        <Tab.Screen name="ExploreTab" component={ExploreNavigator} options={exploreTabOptions} />
+      ) : (
+        <Tab.Screen
+          name="ChatTab"
+          component={ChatNavigator}
+          options={{
+            tabBarLabel: t('navChat'),
+            tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name={icons.ChatTab} size={size} color={color} />,
+            tabBarBadge: undefined,
+          }}
+        />
+      )}
       <Tab.Screen
         name="ProfileTab"
         component={ProfileNavigator}

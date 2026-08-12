@@ -9,9 +9,9 @@ import { Avatar } from '../../components/Avatar';
 import { listThreads, BackendChat } from '../../services/api';
 import { getSocket } from '../../services/socket';
 import { useApp } from '../../context/AppContext';
-import { ChatStackParamList } from '../../navigation/types';
+import { ChatStackParamList, ProfileStackParamList } from '../../navigation/types';
 
-type Props = NativeStackScreenProps<ChatStackParamList, 'ChatList'>;
+type Props = NativeStackScreenProps<ChatStackParamList | ProfileStackParamList, 'ChatList'>;
 
 type ChatTab = 'chats' | 'requests';
 

@@ -79,9 +79,15 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const myApplication = job.applicants.find((a) => a.userId._id === currentUser?.id);
   const isAcceptedApplicant = myApplication?.status === 'accepted';
   const payLabel = `₹${job.payAmount}`;
+  // Employer-only accounts never apply to jobs, on any screen — matches the same rule
+  // already enforced in JobCard/JobRow for list views. When none of the other footer states
+  // apply (not the poster, no application) and this account can't apply either, there's
+  // nothing actionable to show, so the whole footer bar is hidden rather than left empty.
+  const cannotApply = currentUser?.accountType === 'employer';
+  const showFooter = isPoster || !!myApplication || !cannotApply;
 
   const handleApply = async () => {
-    if (applying) return;
+    if (applying || cannotApply) return;
     setApplying(true);
     try {
       await applyToJob(job._id);
@@ -286,9 +292,10 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           ) : null}
         </View>
 
-        <View style={{ height: footerHeight }} />
+        <View style={{ height: showFooter ? footerHeight : 0 }} />
       </ScrollView>
 
+      {showFooter && (
       <View
         style={[styles.footer, { paddingBottom: Math.max(insets.bottom, theme.spacing.md) }]}
         onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
@@ -355,6 +362,7 @@ export const JobDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           />
         )}
       </View>
+      )}
       </ScreenContainer>
       <ReportModal visible={reportVisible} targetType="job" targetId={job._id} onClose={() => setReportVisible(false)} />
     </>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TextInput, FlatList, StyleSheet, Pressable, ScrollView, Keyboard, ActivityIndicator, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { theme } from '../../theme';
 import { ScreenContainer } from '../../components/ScreenContainer';
@@ -11,6 +12,10 @@ import { toJobViewModel } from '../../utils/jobAdapter';
 import { Job } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { HomeStackParamList, SearchStackParamList } from '../../navigation/types';
+
+// "Full Time" has no dedicated field on the Job model — a job lasting a full work day (8h+)
+// is the closest honest proxy this data actually supports.
+const FULL_TIME_MIN_HOURS = 8;
 
 type Props = NativeStackScreenProps<HomeStackParamList | SearchStackParamList, any>;
 
@@ -46,24 +51,55 @@ export const SearchScreen: React.FC<Props> = ({ navigation }) => {
   const [results, setResults] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | undefined>();
+
+  // Needed for "Nearby" (server-side radius query) and to show a real distanceKm on every
+  // row instead of always 0 — silent best-effort, same pattern as the Home feed.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (!permission.granted || cancelled) return;
+        const pos = await Location.getCurrentPositionAsync({});
+        if (!cancelled) setUserLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      } catch {
+        // Nearby just won't be able to narrow by radius without this.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const runSearch = useCallback(
     async (text: string, activeFilters: FilterState = filters, active: QuickFilter = quickFilter) => {
       if (!accessToken) return;
       setLoading(true);
       try {
+        const nearby = active === 'Nearby';
         const res = await listJobs(accessToken, {
           status: 'open',
           search: text.trim() || undefined,
           category: activeFilters.categories.length === 1 ? activeFilters.categories[0] : undefined,
-          // "Nearby" tightens the radius; the panel's own value wins otherwise.
-          distanceKm: active === 'Nearby' ? Math.min(activeFilters.distanceKm, 5) : activeFilters.distanceKm,
+          // "Nearby" tightens the radius, but the radius query only actually runs server-side
+          // when lat/lng are also sent (see jobController.listJobs) — without a device fix,
+          // fall back to the panel's own (wider, coordinate-free) distance value.
+          ...(nearby && userLocation
+            ? { lat: userLocation.latitude, lng: userLocation.longitude, distanceKm: Math.min(activeFilters.distanceKm, 5) }
+            : { distanceKm: activeFilters.distanceKm }),
           payMin: activeFilters.payMin,
           payMax: activeFilters.payMax,
           date: activeFilters.todayOnly ? new Date().toISOString() : undefined,
           limit: 30,
         });
-        setResults(res.data.map((job) => toJobViewModel(job)));
+        let mapped = res.data.map((job) => toJobViewModel(job, userLocation));
+        if (active === 'Trending') {
+          mapped = [...mapped].sort((a, b) => b.peopleApplied - a.peopleApplied);
+        } else if (active === 'Full Time') {
+          mapped = mapped.filter((job) => job.durationHours >= FULL_TIME_MIN_HOURS);
+        }
+        setResults(mapped);
       } catch {
         setResults([]);
       } finally {
@@ -71,13 +107,13 @@ export const SearchScreen: React.FC<Props> = ({ navigation }) => {
         setRefreshing(false);
       }
     },
-    [accessToken, filters, quickFilter]
+    [accessToken, filters, quickFilter, userLocation]
   );
 
   useEffect(() => {
     runSearch(query, filters, quickFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, quickFilter]);
+  }, [accessToken, quickFilter, userLocation]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);

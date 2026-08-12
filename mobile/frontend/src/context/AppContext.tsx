@@ -454,6 +454,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const applyToJob = useCallback(
     async (jobId: string) => {
       if (!tokens) throw new Error('Not authenticated');
+      if (currentUser?.accountType === 'employer') {
+        throw new Error('Employer accounts cannot apply to jobs.');
+      }
       if (!isProfileComplete(currentUser)) {
         throw new Error('Please complete your profile before accepting or applying to jobs.');
       }

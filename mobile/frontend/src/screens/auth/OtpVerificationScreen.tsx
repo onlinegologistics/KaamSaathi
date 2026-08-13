@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -12,18 +12,21 @@ import { AuthStackParamList } from '../../navigation/types';
 type Props = NativeStackScreenProps<AuthStackParamList, 'OtpVerification'>;
 
 const OTP_LENGTH = 4;
+const RESEND_COOLDOWN = 30;
 
 export const OtpVerificationScreen: React.FC<Props> = ({ navigation, route }) => {
-  const { t, phoneNumber, confirmOtp, requestOtp, remoteSettings } = useApp();
+  const { t, authIdentifierValue, authIdentifierType, confirmOtp, requestOtp, remoteSettings } = useApp();
   const [demoOtp, setDemoOtp] = useState(route.params.demoOtp);
   const [otp, setOtp] = useState('');
   const [errorText, setErrorText] = useState('');
   const [verifying, setVerifying] = useState(false);
+  const [cooldown, setCooldown] = useState(RESEND_COOLDOWN);
   const inputRef = useRef<TextInput>(null);
+  const lastAutoSubmittedOtpRef = useRef<string | null>(null);
 
   const content = remoteSettings['mobile.authFlow.content']?.otpVerification;
-  const title = content?.title || t('verifyOtp');
-  const otpSentToLabel = content?.otpSentToLabel || t('otpSentTo');
+  const title = content?.title || 'Enter OTP';
+  const otpSentToLabel = content?.otpSentToLabel || "We've sent a 4-digit code to";
   const resendLabel = content?.resendLabel || t('resendOtp');
   const verifyLabel = content?.verifyLabel || t('verify');
 
@@ -32,40 +35,63 @@ export const OtpVerificationScreen: React.FC<Props> = ({ navigation, route }) =>
     return () => clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((prev) => prev - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
   const handleChange = (value: string) => {
     const digitsOnly = value.replace(/[^0-9]/g, '').slice(0, OTP_LENGTH);
     setOtp(digitsOnly);
     setErrorText('');
+    if (digitsOnly.length < OTP_LENGTH) {
+      lastAutoSubmittedOtpRef.current = null;
+    }
   };
 
-  const handleVerify = async () => {
-    if (otp.length !== OTP_LENGTH || verifying) return;
+  const handleVerify = useCallback(async (code = otp) => {
+    if (code.length !== OTP_LENGTH || verifying) return;
     setVerifying(true);
     try {
-      await confirmOtp(otp);
+      await confirmOtp(code);
       // RootNavigator reacts when auth state flips after OTP verification.
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Incorrect code. Please try again.';
       setErrorText(
         message.includes('No account found')
-          ? 'This phone number is not registered. Please register first.'
+          ? authIdentifierType === 'email'
+            ? 'No account found with this email. Please register with your phone number first.'
+            : 'This phone number is not registered. Please register first.'
           : message
       );
     } finally {
       setVerifying(false);
     }
-  };
+  }, [authIdentifierType, confirmOtp, otp, verifying]);
+
+  useEffect(() => {
+    if (otp.length !== OTP_LENGTH || verifying || lastAutoSubmittedOtpRef.current === otp) return;
+    lastAutoSubmittedOtpRef.current = otp;
+    handleVerify(otp);
+  }, [handleVerify, otp, verifying]);
 
   const handleResend = async () => {
+    if (cooldown > 0) return;
     setOtp('');
     setErrorText('');
+    lastAutoSubmittedOtpRef.current = null;
     try {
-      const { demoOtp: newOtp } = await requestOtp(phoneNumber);
+      const { demoOtp: newOtp } =
+        authIdentifierType === 'email' ? await requestOtp({ email: authIdentifierValue }) : await requestOtp({ phone: authIdentifierValue });
       setDemoOtp(newOtp);
+      setCooldown(RESEND_COOLDOWN);
     } catch {
       // best-effort resend; user can retry via the button again
     }
   };
+
+  const cooldownLabel = `0:${String(cooldown).padStart(2, '0')}`;
 
   return (
     <ScreenContainer>
@@ -75,11 +101,11 @@ export const OtpVerificationScreen: React.FC<Props> = ({ navigation, route }) =>
 
       <View style={styles.body}>
         <View style={styles.iconCircle}>
-          <MaterialCommunityIcons name="shield-check-outline" size={40} color={theme.colors.secondary} />
+          <MaterialCommunityIcons name="message-text-outline" size={36} color={theme.colors.primary} />
         </View>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.subtitle}>
-          {otpSentToLabel} {phoneNumber || '+91 XXXXX XXXXX'}
+          {otpSentToLabel} {authIdentifierValue || '+91 XXXXX XXXXX'}
         </Text>
         <Text style={styles.hint}>(Demo code: {demoOtp})</Text>
 
@@ -111,9 +137,13 @@ export const OtpVerificationScreen: React.FC<Props> = ({ navigation, route }) =>
           </Pressable>
         ) : null}
 
-        <Pressable onPress={handleResend} style={styles.resendBtn}>
-          <Text style={styles.resendText}>{resendLabel}</Text>
-        </Pressable>
+        {cooldown > 0 ? (
+          <Text style={styles.cooldownText}>Resend OTP in {cooldownLabel}</Text>
+        ) : (
+          <Pressable onPress={handleResend} style={styles.resendBtn}>
+            <Text style={styles.resendText}>{resendLabel}</Text>
+          </Pressable>
+        )}
       </View>
 
       <View style={styles.footer}>
@@ -143,10 +173,10 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.lg,
   },
   iconCircle: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    backgroundColor: theme.colors.secondaryLight,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: theme.colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: theme.spacing.md,
@@ -227,6 +257,11 @@ const styles = StyleSheet.create({
   resendText: {
     ...theme.typography.bodyBold,
     color: theme.colors.primary,
+  },
+  cooldownText: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.lg,
   },
   footer: {
     paddingHorizontal: theme.spacing.lg,

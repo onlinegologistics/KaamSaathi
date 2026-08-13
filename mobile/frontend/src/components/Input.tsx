@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TextInput, StyleSheet, TextInputProps } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, TextInputProps } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { theme } from '../theme';
 
@@ -7,9 +7,21 @@ interface InputProps extends TextInputProps {
   label?: string;
   icon?: keyof typeof MaterialCommunityIcons.glyphMap;
   error?: string;
+  rightIcon?: keyof typeof MaterialCommunityIcons.glyphMap;
+  onRightIconPress?: () => void;
+  rightIconAccessibilityLabel?: string;
 }
 
-export const Input: React.FC<InputProps> = ({ label, icon, error, style, ...rest }) => {
+export const Input: React.FC<InputProps> = ({
+  label,
+  icon,
+  error,
+  style,
+  rightIcon,
+  onRightIconPress,
+  rightIconAccessibilityLabel,
+  ...rest
+}) => {
   return (
     <View style={styles.wrapper}>
       {label && <Text style={styles.label}>{label}</Text>}
@@ -20,6 +32,17 @@ export const Input: React.FC<InputProps> = ({ label, icon, error, style, ...rest
           placeholderTextColor={theme.colors.textMuted}
           {...rest}
         />
+        {rightIcon && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={rightIconAccessibilityLabel}
+            onPress={onRightIconPress}
+            hitSlop={10}
+            style={styles.rightIconBtn}
+          >
+            <MaterialCommunityIcons name={rightIcon} size={20} color={theme.colors.textMuted} />
+          </Pressable>
+        )}
       </View>
       {error && <Text style={styles.error}>{error}</Text>}
     </View>
@@ -57,6 +80,10 @@ const styles = StyleSheet.create({
     ...theme.typography.body,
     color: theme.colors.text,
     paddingVertical: theme.spacing.sm,
+  },
+  rightIconBtn: {
+    marginLeft: theme.spacing.xs,
+    padding: 2,
   },
   error: {
     ...theme.typography.caption,

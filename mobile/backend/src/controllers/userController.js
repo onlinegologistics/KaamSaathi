@@ -15,7 +15,6 @@ const requireRegistrationFields = (body, user) => {
   const hasExistingLocation = Array.isArray(user.location?.coordinates) && user.location.coordinates.length === 2;
   const missing = [];
   if (!body.name) missing.push('name');
-  if (!body.email) missing.push('email');
   if (!body.password && !user.passwordHash) missing.push('password');
   if (!body.termsAccepted) missing.push('termsAccepted');
   if (!body.location && !hasExistingLocation) missing.push('location');
@@ -42,6 +41,16 @@ const profilePayload = async (body, user) => {
   const payload = { ...body };
   if (body.location) {
     payload.location = toGeoPoint(body.location);
+  }
+  // Email now doubles as an optional login identifier (see authController's email+OTP
+  // path), so two accounts sharing one email would make login ambiguous. Enforced here
+  // rather than a DB unique index, since existing users already have `email: ''` by
+  // default and a blind unique index would collide across all of them.
+  if (body.email && body.email !== user.email) {
+    const emailTaken = await User.exists({ email: body.email, _id: { $ne: user._id } });
+    if (emailTaken) {
+      throw new ApiError(409, 'This email is already in use by another account', 'EMAIL_ALREADY_IN_USE');
+    }
   }
   if (body.kyc) {
     const existingKyc = nested(user.kyc);

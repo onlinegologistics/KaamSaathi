@@ -7,7 +7,7 @@ export type AuthStackParamList = {
   Splash: undefined;
   PhoneEntry: undefined;
   OtpVerification: { demoOtp: string };
-  ProfileSetup: undefined;
+  ProfileSetup: { prefillName?: string; prefillEmail?: string } | undefined;
 };
 
 export type LiveLocationParams = { jobId: string; otherUserName: string };

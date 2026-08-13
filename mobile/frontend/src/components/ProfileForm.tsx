@@ -1,4 +1,4 @@
-import React, { useCallback, useImperativeHandle, useMemo, useState } from 'react';
+import React, { useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Image, Pressable, Alert, Platform } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -8,6 +8,7 @@ import { theme } from '../theme';
 import { Button } from './Button';
 import { Input } from './Input';
 import { LocationPickerModal } from './LocationPickerModal';
+import { ImagePreviewModal } from './ImagePreviewModal';
 import { useApp } from '../context/AppContext';
 import {
   AccountType,
@@ -106,6 +107,11 @@ export interface ProfileFormValues {
 
 interface ProfileFormProps {
   initialUser?: User | null;
+  /** Seeds the name/email fields without triggering "editing an existing user" behavior
+   *  (e.g. the account-type picker still shows) — used to pre-fill a fresh registration
+   *  from an OAuth profile while leaving every field editable. */
+  initialName?: string;
+  initialEmail?: string;
   submitLabel: string;
   submitting: boolean;
   requirePhone?: boolean;
@@ -120,6 +126,8 @@ export interface ProfileFormHandle {
 
 export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>(({
   initialUser,
+  initialName,
+  initialEmail,
   submitLabel,
   submitting,
   requirePhone,
@@ -134,10 +142,10 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
   const kycApproved = section === 'kyc' && initialUser?.kyc?.status === 'verified';
   const showCoreFields = !displayExtras || showProfileSection;
   const { t, categories } = useApp();
-  const [name, setName] = useState(initialUser?.name ?? '');
+  const [name, setName] = useState(initialUser?.name ?? initialName ?? '');
   const [phoneDigits, setPhoneDigits] = useState(initialUser?.phone?.replace(/^\+91/, '').replace(/\D/g, '').slice(0, 10) ?? '');
   const [photoUri, setPhotoUri] = useState<string | null>(initialUser?.avatar ?? null);
-  const [email, setEmail] = useState(initialUser?.email ?? '');
+  const [email, setEmail] = useState(initialUser?.email ?? initialEmail ?? '');
   const [dobDate, setDobDate] = useState<Date | null>(
     initialUser?.dateOfBirth ? toUtcMidnight(new Date(initialUser.dateOfBirth)) : null
   );
@@ -147,6 +155,7 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
   const [education, setEducation] = useState(initialUser?.education ?? '');
   const [currentAddress, setCurrentAddress] = useState(initialUser?.currentAddress ?? '');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [accountType, setAccountType] = useState<AccountType>(
     initialUser?.accountType ?? 'worker'
   );
@@ -192,6 +201,9 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
   const [mapVisible, setMapVisible] = useState(false);
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState('');
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [previewTitle, setPreviewTitle] = useState<string | undefined>(undefined);
+  const previewOnConfirmRef = useRef<((uri: string) => void) | null>(null);
 
   const dobIso = dobDate ? dobDate.toISOString() : null;
   const emailValue = email.trim();
@@ -240,7 +252,8 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
   const canSubmit =
     name.trim().length > 0 &&
     (!requirePhone || phoneDigits.length === 10) &&
-    (!requirePhone || (!!emailValue && !emailHasError)) &&
+    // Email is optional — only its format is validated when something's actually typed.
+    !emailHasError &&
     (!requirePhone || passwordValue.length >= 6) &&
     (!!location || (!!initialUser && !requirePhone)) &&
     (!requirePhone || termsAccepted);
@@ -265,7 +278,17 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
     setDobPickerVisible(true);
   };
 
-  const pickImage = async (onPick: (uri: string) => void) => {
+  // Picking never commits straight into form state — it stages the result behind the
+  // preview modal so there's always an explicit save step (the modal's confirm arrow)
+  // before an image/document is actually kept, on top of whatever crop step the native
+  // picker itself offered.
+  const stageForPreview = (uri: string, title: string, onPick: (uri: string) => void) => {
+    setPreviewUri(uri);
+    setPreviewTitle(title);
+    previewOnConfirmRef.current = onPick;
+  };
+
+  const pickImage = async (title: string, onPick: (uri: string) => void) => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission needed', 'Please allow photo library access to add a profile photo.');
@@ -279,15 +302,15 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
       base64: true,
     });
     if (!result.canceled && result.assets?.[0]) {
-      onPick(toDataUri(result.assets[0]));
+      stageForPreview(toDataUri(result.assets[0]), title, onPick);
     }
   };
 
-  const pickPhoto = () => pickImage(setPhotoUri);
-  const pickCompanyLogo = () => pickImage(setCompanyLogoUri);
-  const pickAadhaarCard = () => pickImage(setAadhaarCardUri);
-  const pickCategoryDocument = (category: JobCategory) =>
-    pickImage((uri) => setCategoryDocumentUris((prev) => ({ ...prev, [category]: uri })));
+  const pickPhoto = () => pickImage('Profile Photo', setPhotoUri);
+  const pickCompanyLogo = () => pickImage('Company Logo', setCompanyLogoUri);
+  const pickAadhaarCard = () => pickImage('Aadhaar Card', setAadhaarCardUri);
+  const pickCategoryDocument = (category: JobCategory, label: string) =>
+    pickImage(label, (uri) => setCategoryDocumentUris((prev) => ({ ...prev, [category]: uri })));
 
   const takeSelfie = async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -304,8 +327,19 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
       cameraType: ImagePicker.CameraType.front,
     });
     if (!result.canceled && result.assets?.[0]) {
-      setSelfieUri(toDataUri(result.assets[0]));
+      stageForPreview(toDataUri(result.assets[0]), 'Selfie', setSelfieUri);
     }
+  };
+
+  const confirmPreview = () => {
+    if (previewUri) previewOnConfirmRef.current?.(previewUri);
+    setPreviewUri(null);
+    previewOnConfirmRef.current = null;
+  };
+
+  const cancelPreview = () => {
+    setPreviewUri(null);
+    previewOnConfirmRef.current = null;
   };
 
   const togglePreferredCategory = (category: JobCategory) => {
@@ -511,10 +545,17 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
           placeholder={t('passwordPlaceholder')}
           value={password}
           onChangeText={setPassword}
-          secureTextEntry
+          secureTextEntry={!showPassword}
+          // Was missing before — without it, the keyboard's default sentence-case auto-cap
+          // could silently alter the first character typed, so what got saved wasn't
+          // necessarily what the user thought they typed.
+          autoCapitalize="none"
           textContentType="newPassword"
           autoComplete="password-new"
           icon="lock-outline"
+          rightIcon={showPassword ? 'eye-off-outline' : 'eye-outline'}
+          onRightIconPress={() => setShowPassword((prev) => !prev)}
+          rightIconAccessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
           error={passwordHasError ? 'Password must be at least 6 characters' : undefined}
         />
       ) : null}
@@ -845,7 +886,7 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
                           label={document.label}
                           value={documentUri}
                           actionLabel={documentUri ? 'Change' : 'Upload'}
-                          onPress={() => pickCategoryDocument(document.category)}
+                          onPress={() => pickCategoryDocument(document.category, document.label)}
                         />
                       );
                     })}
@@ -955,6 +996,14 @@ export const ProfileForm = React.forwardRef<ProfileFormHandle, ProfileFormProps>
           setLocation(loc);
           setMapVisible(false);
         }}
+      />
+
+      <ImagePreviewModal
+        visible={!!previewUri}
+        uri={previewUri}
+        title={previewTitle}
+        onCancel={cancelPreview}
+        onConfirm={confirmPreview}
       />
     </>
   );

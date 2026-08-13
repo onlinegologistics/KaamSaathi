@@ -1,37 +1,51 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Pressable, TextInput } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Pressable, TextInput, ScrollView, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Path } from 'react-native-svg';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { theme } from '../../theme';
 import { ScreenContainer } from '../../components/ScreenContainer';
+import { GoogleMark } from '../../components/GoogleMark';
 import { useApp } from '../../context/AppContext';
 import { AuthStackParamList } from '../../navigation/types';
+import { signInWithGoogle } from '../../services/socialAuth';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'PhoneEntry'>;
 type SocialIcon = 'google' | 'facebook' | 'apple';
 
 export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
-  const { t, loginWithPassword, requestOtp, remoteSettings } = useApp();
+  const { t, loginWithPassword, loginWithOAuth, requestOtp, remoteSettings } = useApp();
+  const [loginMode, setLoginMode] = useState<'phone' | 'email'>('phone');
   const [digits, setDigits] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [useOtpLogin, setUseOtpLogin] = useState(false);
+  const [email, setEmail] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
   const [sending, setSending] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState<'google' | 'facebook' | null>(null);
+  const [oauthPrefill, setOauthPrefill] = useState<{ name: string; email: string } | null>(null);
   const [error, setError] = useState('');
   const inputRef = useRef<TextInput>(null);
   const passwordInputRef = useRef<TextInput>(null);
+  const emailInputRef = useRef<TextInput>(null);
 
   const content = remoteSettings['mobile.authFlow.content']?.phoneEntry;
-  const title = content?.title || 'Enter your phone number';
-  const subtitle = content?.subtitle || 'Use your password, or continue with OTP';
-  const otpLoginLabel = content?.sendOtpLabel || 'Login with OTP';
+  const title =
+    loginMode === 'email' ? 'Login with Email' : content?.title || 'Login with Phone';
+  const subtitle = useOtpLogin
+    ? loginMode === 'email'
+      ? "We'll send you an OTP to verify your email"
+      : content?.subtitle || "We'll send you an OTP to verify your number"
+    : 'Enter your password to continue';
+  const otpLoginLabel = content?.sendOtpLabel || 'Send OTP';
 
   const isValid = digits.length === 10;
+  const emailValue = email.trim();
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue);
   const passwordValue = password.trim();
-  const canPasswordLogin = !useOtpLogin && isValid && passwordValue.length >= 6;
-  const canPrimaryLogin = useOtpLogin ? isValid : canPasswordLogin;
+  const identifierValid = loginMode === 'email' ? isEmailValid : isValid;
+  const canPrimaryLogin = useOtpLogin ? identifierValid : identifierValid && passwordValue.length >= 6;
   const primaryLabel = useOtpLogin
     ? sending
       ? 'Sending...'
@@ -45,17 +59,28 @@ export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
     setError('');
   };
 
+  const selectLoginMode = (mode: 'phone' | 'email') => {
+    if (mode === loginMode) return;
+    setLoginMode(mode);
+    setPassword('');
+    setError('');
+  };
+
   const handlePasswordLogin = async () => {
-    if (useOtpLogin || !canPasswordLogin || loggingIn || sending) return;
+    if (useOtpLogin || !canPrimaryLogin || loggingIn || sending) return;
     setLoggingIn(true);
     setError('');
+    setOauthPrefill(null);
     try {
-      await loginWithPassword(`+91${digits}`, passwordValue);
+      const identifier = loginMode === 'email' ? { email: emailValue } : { phone: `+91${digits}` };
+      await loginWithPassword(identifier, passwordValue);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not log in. Try again.';
       setError(
         message.includes('No account found')
-          ? 'This phone number is not registered. Please register first.'
+          ? loginMode === 'email'
+            ? 'No account found with this email. Please register with your phone number first.'
+            : 'This phone number is not registered. Please register first.'
           : message
       );
     } finally {
@@ -67,8 +92,9 @@ export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
     if (!isValid || sending || loggingIn) return;
     setSending(true);
     setError('');
+    setOauthPrefill(null);
     try {
-      const { demoOtp } = await requestOtp(`+91${digits}`);
+      const { demoOtp } = await requestOtp({ phone: `+91${digits}` });
       navigation.navigate('OtpVerification', { demoOtp });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not send OTP. Try again.';
@@ -82,12 +108,59 @@ export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
+  const handleSendEmailOtp = async () => {
+    if (!isEmailValid || sending || loggingIn) return;
+    setSending(true);
+    setError('');
+    setOauthPrefill(null);
+    try {
+      const { demoOtp } = await requestOtp({ email: emailValue });
+      navigation.navigate('OtpVerification', { demoOtp });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not send OTP. Try again.';
+      setError(
+        message.includes('No account found')
+          ? 'No account found with this email. Please register with your phone number first.'
+          : message
+      );
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handlePrimaryLogin = () => {
     if (useOtpLogin) {
-      handleSend();
+      if (loginMode === 'email') {
+        handleSendEmailOtp();
+      } else {
+        handleSend();
+      }
       return;
     }
     handlePasswordLogin();
+  };
+
+  const handleGoogleLogin = async () => {
+    if (oauthLoading) return;
+    setOauthLoading('google');
+    setError('');
+    setOauthPrefill(null);
+    let googleProfile: { name: string; email: string } | null = null;
+    try {
+      const { idToken, name, email } = await signInWithGoogle();
+      googleProfile = { name, email };
+      await loginWithOAuth('google', idToken);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not sign in with Google.';
+      if (message.includes('No account found') && googleProfile) {
+        setOauthPrefill(googleProfile);
+        setError('This Google email is not registered. Please register with your phone number first.');
+      } else {
+        setError(message);
+      }
+    } finally {
+      setOauthLoading(null);
+    }
   };
 
   return (
@@ -114,168 +187,279 @@ export const PhoneEntryScreen: React.FC<Props> = ({ navigation }) => {
             </Pressable>
           </View>
 
-          <View style={styles.content}>
-            <View style={styles.iconHaloOuter}>
-              <View style={styles.iconHaloInner}>
-                <View style={styles.iconCircle}>
-                  <MaterialCommunityIcons name="cellphone-message" size={36} color={theme.colors.primary} />
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.content}>
+              <View style={styles.iconHaloOuter}>
+                <View style={styles.iconHaloInner}>
+                  <View style={styles.iconCircle}>
+                    <MaterialCommunityIcons name="handshake" size={32} color={theme.colors.primary} />
+                  </View>
                 </View>
               </View>
-            </View>
 
-            <Text style={styles.title}>{title}</Text>
-            <Text style={styles.subtitle}>{subtitle}</Text>
+              <Text style={styles.welcomeTitle}>Welcome Back 👋</Text>
+              <Text style={styles.welcomeSubtitle}>Login to continue to your account</Text>
 
-            <Pressable
-              style={styles.inputRow}
-              accessibilityRole="button"
-              accessibilityLabel={t('phoneNumber')}
-              onPress={() => inputRef.current?.focus()}
-            >
-              <View style={styles.countryCode}>
-                <View style={styles.flag}>
-                  <View style={[styles.flagStripe, styles.flagSaffron]} />
-                  <View style={[styles.flagStripe, styles.flagWhite]} />
-                  <View style={[styles.flagStripe, styles.flagGreen]} />
-                </View>
-                <Text style={styles.countryCodeText}>+91</Text>
-              </View>
-              <TextInput
-                ref={inputRef}
-                value={digits}
-                onChangeText={(text) => setDigits(text.replace(/\D/g, '').slice(0, 10))}
-                placeholder="Enter your phone number"
-                placeholderTextColor="#B8B2AA"
-                keyboardType="phone-pad"
-                textContentType="telephoneNumber"
-                autoComplete="tel"
-                maxLength={10}
-                autoFocus
-                returnKeyType={useOtpLogin ? 'go' : 'next'}
-                onSubmitEditing={() => {
-                  if (useOtpLogin) {
-                    handleSend();
-                    return;
-                  }
-                  passwordInputRef.current?.focus();
-                }}
-                style={styles.numberInput}
-              />
-            </Pressable>
-
-            {useOtpLogin ? (
-              <Pressable
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: true }}
-                accessibilityLabel="Login with OTP"
-                onPress={toggleOtpLogin}
-                style={({ pressed }) => [styles.otpModeRow, pressed && styles.pressed]}
-              >
-                <MaterialCommunityIcons name="cellphone-message" size={20} color={theme.colors.primary} style={styles.passwordIcon} />
-                <View style={[styles.otpCheckbox, styles.otpCheckboxChecked]}>
-                  <MaterialCommunityIcons name="check" size={15} color={theme.colors.textInverse} />
-                </View>
-                <Text style={[styles.otpCheckText, styles.otpCheckTextActive]}>OTP</Text>
-              </Pressable>
-            ) : (
-              <View style={[styles.inputRow, styles.passwordRow]}>
-                <MaterialCommunityIcons name="lock-outline" size={20} color={theme.colors.textMuted} style={styles.passwordIcon} />
-                <TextInput
-                  ref={passwordInputRef}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="Password"
-                  placeholderTextColor="#B8B2AA"
-                  secureTextEntry
-                  textContentType="password"
-                  autoComplete="password"
-                  autoCapitalize="none"
-                  returnKeyType="go"
-                  onSubmitEditing={handlePasswordLogin}
-                  style={styles.passwordInput}
-                />
+              <View style={styles.tabRow}>
                 <Pressable
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: false }}
-                  accessibilityLabel="Login with OTP"
-                  onPress={toggleOtpLogin}
-                  hitSlop={8}
-                  style={({ pressed }) => [styles.otpCheckWrap, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: loginMode === 'phone' }}
+                  onPress={() => selectLoginMode('phone')}
+                  style={[styles.tabButton, loginMode === 'phone' && styles.tabButtonActive]}
                 >
-                  <View style={styles.otpCheckbox} />
-                  <Text style={styles.otpCheckText}>OTP</Text>
+                  <MaterialCommunityIcons
+                    name="phone"
+                    size={16}
+                    color={loginMode === 'phone' ? theme.colors.primary : theme.colors.textSecondary}
+                  />
+                  <Text style={[styles.tabText, loginMode === 'phone' && styles.tabTextActive]}>Phone</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: loginMode === 'email' }}
+                  onPress={() => selectLoginMode('email')}
+                  style={[styles.tabButton, loginMode === 'email' && styles.tabButtonActive]}
+                >
+                  <MaterialCommunityIcons
+                    name="email-outline"
+                    size={16}
+                    color={loginMode === 'email' ? theme.colors.primary : theme.colors.textSecondary}
+                  />
+                  <Text style={[styles.tabText, loginMode === 'email' && styles.tabTextActive]}>Email</Text>
                 </Pressable>
               </View>
-            )}
 
-            {!!error && <Text style={styles.errorText}>{error}</Text>}
-            {error.includes('not registered') ? (
+              <View style={styles.modeInfoRow}>
+                <View style={styles.modeInfoIcon}>
+                  <MaterialCommunityIcons
+                    name={!useOtpLogin ? 'lock-outline' : loginMode === 'email' ? 'email-outline' : 'cellphone-message'}
+                    size={22}
+                    color={theme.colors.primary}
+                  />
+                </View>
+                <View style={styles.modeInfoText}>
+                  <Text style={styles.modeInfoTitle}>{title}</Text>
+                  <Text style={styles.modeInfoSubtitle}>{subtitle}</Text>
+                </View>
+              </View>
+
+              {loginMode === 'phone' && (
+                <Pressable
+                  style={styles.inputRow}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('phoneNumber')}
+                  onPress={() => inputRef.current?.focus()}
+                >
+                  <View style={styles.countryCode}>
+                    <View style={styles.flag}>
+                      <View style={[styles.flagStripe, styles.flagSaffron]} />
+                      <View style={[styles.flagStripe, styles.flagWhite]} />
+                      <View style={[styles.flagStripe, styles.flagGreen]} />
+                    </View>
+                    <Text style={styles.countryCodeText}>+91</Text>
+                  </View>
+                  <TextInput
+                    ref={inputRef}
+                    value={digits}
+                    onChangeText={(text) => setDigits(text.replace(/\D/g, '').slice(0, 10))}
+                    placeholder="Enter your phone number"
+                    placeholderTextColor="#B8B2AA"
+                    keyboardType="phone-pad"
+                    textContentType="telephoneNumber"
+                    autoComplete="tel"
+                    maxLength={10}
+                    autoFocus
+                    returnKeyType={useOtpLogin ? 'go' : 'next'}
+                    onSubmitEditing={() => {
+                      if (useOtpLogin) {
+                        handleSend();
+                        return;
+                      }
+                      passwordInputRef.current?.focus();
+                    }}
+                    style={styles.numberInput}
+                  />
+                </Pressable>
+              )}
+
+              {loginMode === 'email' && (
+                <View style={styles.inputRow}>
+                  <MaterialCommunityIcons name="email-outline" size={20} color={theme.colors.textMuted} style={styles.passwordIcon} />
+                  <TextInput
+                    ref={emailInputRef}
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="Enter your email address"
+                    placeholderTextColor="#B8B2AA"
+                    keyboardType="email-address"
+                    textContentType="emailAddress"
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    autoFocus
+                    returnKeyType={useOtpLogin ? 'go' : 'next'}
+                    onSubmitEditing={() => {
+                      if (useOtpLogin) {
+                        handleSendEmailOtp();
+                        return;
+                      }
+                      passwordInputRef.current?.focus();
+                    }}
+                    style={styles.passwordInput}
+                  />
+                </View>
+              )}
+
+              {!useOtpLogin && (
+                <View style={[styles.inputRow, styles.passwordRow]}>
+                  <MaterialCommunityIcons name="lock-outline" size={20} color={theme.colors.textMuted} style={styles.passwordIcon} />
+                  <TextInput
+                    ref={passwordInputRef}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="Password"
+                    placeholderTextColor="#B8B2AA"
+                    secureTextEntry={!showPassword}
+                    textContentType="password"
+                    autoComplete="password"
+                    autoCapitalize="none"
+                    returnKeyType="go"
+                    onSubmitEditing={handlePasswordLogin}
+                    style={styles.passwordInput}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                    onPress={() => setShowPassword((prev) => !prev)}
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.eyeToggle, pressed && styles.pressed]}
+                  >
+                    <MaterialCommunityIcons
+                      name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                      size={20}
+                      color={theme.colors.textMuted}
+                    />
+                  </Pressable>
+                </View>
+              )}
+
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: useOtpLogin }}
+                accessibilityLabel="Login with OTP instead"
+                onPress={toggleOtpLogin}
+                hitSlop={8}
+                style={({ pressed }) => [styles.switchLinkRow, pressed && styles.pressed]}
+              >
+                <View style={[styles.switchCheckbox, useOtpLogin && styles.switchCheckboxChecked]}>
+                  {useOtpLogin && <MaterialCommunityIcons name="check" size={13} color={theme.colors.textInverse} />}
+                </View>
+                <Text style={styles.switchLinkText}>Login with OTP instead</Text>
+              </Pressable>
+
+              {!!error && <Text style={styles.errorText}>{error}</Text>}
+              {error.includes('not registered') ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() =>
+                    navigation.navigate(
+                      'ProfileSetup',
+                      oauthPrefill ? { prefillName: oauthPrefill.name, prefillEmail: oauthPrefill.email } : undefined
+                    )
+                  }
+                  style={styles.registerPromptBtn}
+                >
+                  <Text style={styles.registerPromptText}>Register Now</Text>
+                </Pressable>
+              ) : null}
+
               <Pressable
                 accessibilityRole="button"
-                onPress={() => navigation.navigate('ProfileSetup')}
-                style={styles.registerPromptBtn}
+                accessibilityLabel={loginMode === 'email' ? 'Send OTP to email' : useOtpLogin ? 'Login with OTP' : 'Login with password'}
+                onPress={handlePrimaryLogin}
+                disabled={!canPrimaryLogin || sending || loggingIn}
+                style={({ pressed }) => [
+                  styles.otpButton,
+                  (!canPrimaryLogin || sending || loggingIn) && styles.disabled,
+                  pressed && canPrimaryLogin && !sending && !loggingIn && styles.pressed,
+                ]}
               >
-                <Text style={styles.registerPromptText}>Register Now</Text>
+                <LinearGradient
+                  colors={['#FF5A1A', '#FF8559']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.otpGradient}
+                >
+                  <Text style={styles.otpButtonText}>{primaryLabel}</Text>
+                </LinearGradient>
               </Pressable>
-            ) : null}
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={useOtpLogin ? 'Login with OTP' : 'Login with password'}
-              onPress={handlePrimaryLogin}
-              disabled={!canPrimaryLogin || sending || loggingIn}
-              style={({ pressed }) => [
-                styles.otpButton,
-                styles.passwordLoginButton,
-                (!canPrimaryLogin || sending || loggingIn) && styles.disabled,
-                pressed && canPrimaryLogin && !sending && !loggingIn && styles.pressed,
-              ]}
-            >
-              <LinearGradient
-                colors={['#FF5A1A', '#FF8559']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.otpGradient}
-              >
-                <Text style={styles.otpButtonText}>{primaryLabel}</Text>
-              </LinearGradient>
-            </Pressable>
+              <View style={styles.registerRow}>
+                <Text style={styles.footerText}>Don't have an account? </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  hitSlop={10}
+                  onPress={() =>
+                    navigation.navigate(
+                      'ProfileSetup',
+                      oauthPrefill ? { prefillName: oauthPrefill.name, prefillEmail: oauthPrefill.email } : undefined
+                    )
+                  }
+                >
+                  <Text style={styles.footerLink}>Register</Text>
+                </Pressable>
+              </View>
 
-            <Text style={styles.continueText}>Or continue with</Text>
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>Or continue with</Text>
+                <View style={styles.dividerLine} />
+              </View>
 
-            <View style={styles.socialRow}>
-              <SocialButton icon="google" />
-              <SocialButton icon="facebook" />
-              <SocialButton icon="apple" />
+              <View style={styles.socialRow}>
+                <SocialButton icon="google" onPress={handleGoogleLogin} loading={oauthLoading === 'google'} disabled={!!oauthLoading} />
+                <SocialButton icon="facebook" disabled />
+                <SocialButton icon="apple" disabled />
+              </View>
+
+              <View style={styles.secureRow}>
+                <MaterialCommunityIcons name="shield-check-outline" size={14} color={theme.colors.textMuted} />
+                <Text style={styles.secureText}>Your data is secure with us</Text>
+              </View>
             </View>
-          </View>
-
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Don't have an account? </Text>
-            <Pressable
-              accessibilityRole="button"
-              hitSlop={10}
-              onPress={() => navigation.navigate('ProfileSetup')}
-            >
-              <Text style={styles.footerLink}>Register</Text>
-            </Pressable>
-          </View>
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </ScreenContainer>
   );
 };
 
-const SocialButton: React.FC<{ icon: SocialIcon }> = ({ icon }) => {
+const SocialButton: React.FC<{
+  icon: SocialIcon;
+  onPress?: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+}> = ({ icon, onPress, loading, disabled }) => {
   const iconColor = icon === 'google' ? '#4285F4' : icon === 'facebook' ? '#1877F2' : '#111111';
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Continue with ${icon}`}
-      style={({ pressed }) => [styles.socialButton, pressed && styles.pressed]}
+      onPress={onPress}
+      disabled={disabled || !onPress}
+      style={({ pressed }) => [
+        styles.socialButton,
+        (disabled || !onPress) && styles.disabled,
+        pressed && onPress && !disabled && styles.pressed,
+      ]}
     >
-      {icon === 'google' ? (
+      {loading ? (
+        <ActivityIndicator size="small" color={theme.colors.primary} />
+      ) : icon === 'google' ? (
         <GoogleMark />
       ) : (
         <MaterialCommunityIcons name={icon} size={22} color={iconColor} />
@@ -284,34 +468,12 @@ const SocialButton: React.FC<{ icon: SocialIcon }> = ({ icon }) => {
   );
 };
 
-const GoogleMark = () => (
-  <Svg width={22} height={22} viewBox="0 0 48 48" accessibilityLabel="Google">
-    <Path
-      fill="#FFC107"
-      d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"
-    />
-    <Path
-      fill="#FF3D00"
-      d="m6.306 14.691 6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"
-    />
-    <Path
-      fill="#4CAF50"
-      d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"
-    />
-    <Path
-      fill="#1976D2"
-      d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.166-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
-    />
-  </Svg>
-);
-
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
   screen: {
     flex: 1,
-    paddingHorizontal: 28,
     overflow: 'hidden',
   },
   glow: {
@@ -326,37 +488,43 @@ const styles = StyleSheet.create({
   header: {
     minHeight: 58,
     justifyContent: 'center',
+    paddingHorizontal: 28,
   },
   backButton: {
     width: theme.MIN_TAP_TARGET,
     height: theme.MIN_TAP_TARGET,
     justifyContent: 'center',
   },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: theme.spacing.xl,
+  },
   content: {
     alignItems: 'center',
-    paddingTop: 42,
+    paddingTop: 18,
+    paddingHorizontal: 28,
   },
   iconHaloOuter: {
-    width: 118,
-    height: 118,
-    borderRadius: 59,
+    width: 104,
+    height: 104,
+    borderRadius: 52,
     backgroundColor: 'rgba(255, 255, 255, 0.42)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 28,
+    marginBottom: theme.spacing.md,
   },
   iconHaloInner: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     backgroundColor: 'rgba(255, 255, 255, 0.7)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   iconCircle: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
@@ -366,16 +534,79 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     elevation: 3,
   },
-  title: {
+  welcomeTitle: {
     ...theme.typography.h2,
     color: theme.colors.text,
     textAlign: 'center',
   },
-  subtitle: {
-    ...theme.typography.tiny,
+  welcomeSubtitle: {
+    ...theme.typography.caption,
     color: theme.colors.textSecondary,
     textAlign: 'center',
     marginTop: 4,
+  },
+  tabRow: {
+    flexDirection: 'row',
+    width: '100%',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.pill,
+    padding: 4,
+    marginTop: theme.spacing.xl,
+    shadowColor: theme.colors.shadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 44,
+    borderRadius: theme.radius.pill,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  tabButtonActive: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primaryLight,
+  },
+  tabText: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '700',
+  },
+  tabTextActive: {
+    color: theme.colors.primary,
+  },
+  modeInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    marginTop: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
+  modeInfoIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: theme.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeInfoText: {
+    flex: 1,
+  },
+  modeInfoTitle: {
+    ...theme.typography.bodyBold,
+    color: theme.colors.text,
+  },
+  modeInfoSubtitle: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    marginTop: 2,
   },
   inputRow: {
     width: '100%',
@@ -384,7 +615,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 36,
+    marginTop: theme.spacing.lg,
     overflow: 'hidden',
     shadowColor: theme.colors.shadow,
     shadowOffset: { width: 0, height: 8 },
@@ -450,52 +681,10 @@ const styles = StyleSheet.create({
     ...theme.typography.tiny,
     color: theme.colors.text,
   },
-  otpModeRow: {
-    width: '100%',
+  eyeToggle: {
+    paddingHorizontal: theme.spacing.xs,
     minHeight: 56,
-    borderRadius: theme.radius.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.primary,
-    backgroundColor: theme.colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: theme.spacing.md,
-    shadowColor: theme.colors.shadow,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    elevation: 2,
-  },
-  otpCheckWrap: {
-    minHeight: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    borderLeftWidth: 1,
-    borderLeftColor: '#F0EBE5',
-    paddingHorizontal: 12,
-  },
-  otpCheckbox: {
-    width: 21,
-    height: 21,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    alignItems: 'center',
     justifyContent: 'center',
-  },
-  otpCheckboxChecked: {
-    backgroundColor: theme.colors.primary,
-    borderColor: theme.colors.primary,
-  },
-  otpCheckText: {
-    ...theme.typography.tiny,
-    color: theme.colors.textSecondary,
-    fontWeight: '800',
-  },
-  otpCheckTextActive: {
-    color: theme.colors.primary,
   },
   errorText: {
     ...theme.typography.caption,
@@ -521,16 +710,13 @@ const styles = StyleSheet.create({
     width: '100%',
     minHeight: 58,
     borderRadius: theme.radius.sm,
-    marginTop: 28,
+    marginTop: theme.spacing.xl,
     overflow: 'hidden',
     shadowColor: theme.colors.primary,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.2,
     shadowRadius: 14,
     elevation: 3,
-  },
-  passwordLoginButton: {
-    marginTop: 22,
   },
   otpGradient: {
     flex: 1,
@@ -543,15 +729,68 @@ const styles = StyleSheet.create({
     color: theme.colors.textInverse,
     fontWeight: '800',
   },
-  continueText: {
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    marginTop: theme.spacing.xl,
+    gap: theme.spacing.sm,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: theme.colors.border,
+  },
+  dividerText: {
     ...theme.typography.tiny,
     color: theme.colors.textSecondary,
-    marginTop: 48,
+  },
+  switchLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    minHeight: theme.MIN_TAP_TARGET,
+    marginTop: theme.spacing.sm,
+  },
+  switchLinkText: {
+    ...theme.typography.caption,
+    color: theme.colors.primary,
+    fontWeight: '700',
+  },
+  switchCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  switchCheckboxChecked: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  registerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: theme.spacing.xl,
+  },
+  footerText: {
+    ...theme.typography.tiny,
+    color: theme.colors.textSecondary,
+  },
+  footerLink: {
+    ...theme.typography.tiny,
+    color: theme.colors.primary,
+    fontWeight: '800',
   },
   socialRow: {
     flexDirection: 'row',
     gap: 24,
-    marginTop: 18,
+    marginTop: theme.spacing.lg,
   },
   socialButton: {
     width: 54,
@@ -566,22 +805,15 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 2,
   },
-  footer: {
-    minHeight: 80,
-    marginTop: 'auto',
-    paddingBottom: theme.spacing.lg,
+  secureRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 6,
+    marginTop: theme.spacing.xl,
   },
-  footerText: {
+  secureText: {
     ...theme.typography.tiny,
-    color: theme.colors.textSecondary,
-  },
-  footerLink: {
-    ...theme.typography.tiny,
-    color: theme.colors.primary,
-    fontWeight: '800',
+    color: theme.colors.textMuted,
   },
   disabled: {
     opacity: 0.55,

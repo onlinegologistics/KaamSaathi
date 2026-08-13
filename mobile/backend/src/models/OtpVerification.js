@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 
 const otpVerificationSchema = new mongoose.Schema(
   {
-    phone: {
+    // A phone number or an email address — whichever the OTP request was for.
+    identifier: {
       type: String,
       required: true,
       index: true,

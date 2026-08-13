@@ -87,6 +87,8 @@ let currentTokens: TokenPair | null = null;
 let onTokensRefreshed: ((tokens: TokenPair) => void) | null = null;
 let onAuthExpired: (() => void) | null = null;
 let refreshInFlight: Promise<TokenPair> | null = null;
+let onRequestStart: (() => void) | null = null;
+let onRequestEnd: (() => void) | null = null;
 
 export const setAuthTokens = (tokens: TokenPair | null) => {
   currentTokens = tokens;
@@ -99,6 +101,18 @@ export const setAuthHandlers = (handlers: {
   onTokensRefreshed = handlers.onTokensRefreshed ?? null;
   onAuthExpired = handlers.onAuthExpired ?? null;
 };
+
+export const setRequestLifecycleHandlers = (handlers: {
+  onRequestStart?: () => void;
+  onRequestEnd?: () => void;
+}) => {
+  onRequestStart = handlers.onRequestStart ?? null;
+  onRequestEnd = handlers.onRequestEnd ?? null;
+};
+
+// Lets a caller read back whatever the current pair is after an await, in case a silent
+// refresh (see refreshAccessToken below) rotated it mid-request.
+export const getAuthTokens = () => currentTokens;
 
 const rawFetch = async (path: string, options: RequestOptions) => {
   const res = await fetch(`${API_BASE_URL}${path}${toQueryString(options.query)}`, {
@@ -140,6 +154,8 @@ const refreshAccessToken = async (): Promise<TokenPair> => {
 };
 
 async function request<T>(path: string, options: RequestOptions = {}, isRetry = false): Promise<T> {
+  if (!isRetry) onRequestStart?.();
+  try {
   const { res, data } = await rawFetch(path, options);
 
   if (!res.ok || data.success === false) {
@@ -173,6 +189,9 @@ async function request<T>(path: string, options: RequestOptions = {}, isRetry = 
   }
 
   return data as T;
+  } finally {
+    if (!isRetry) onRequestEnd?.();
+  }
 }
 
 export interface BackendUser {
@@ -303,22 +322,44 @@ export const updateAdminCategory = (accessToken: string, key: string, category: 
     },
   });
 
-export const sendOtp = (phone: string, intent: 'login' | 'register' = 'login') =>
+// Exactly one of phone/email — email-based OTP is only for logging into an existing account
+// (accounts are always created phone-first), see authController.sendOtp/verifyOtp.
+export type AuthIdentifier = { phone: string; email?: undefined } | { phone?: undefined; email: string };
+
+export const sendOtp = (identifier: AuthIdentifier, intent: 'login' | 'register' = 'login') =>
   request<{ success: true; otp: string; message: string }>('/auth/send-otp', {
     method: 'POST',
-    body: { phone, intent },
+    body: { ...identifier, intent },
   });
 
-export const verifyOtp = (phone: string, otp: string, intent: 'login' | 'register' = 'login') =>
+export const verifyOtp = (identifier: AuthIdentifier, otp: string, intent: 'login' | 'register' = 'login') =>
   request<{ success: true; user: BackendUser; isNewUser: boolean } & TokenPair>('/auth/verify-otp', {
     method: 'POST',
-    body: { phone, otp, intent },
+    body: { ...identifier, otp, intent },
   });
 
-export const loginWithPassword = (phone: string, password: string) =>
+export const loginWithPassword = (identifier: AuthIdentifier, password: string) =>
   request<{ success: true; user: BackendUser; isNewUser: false } & TokenPair>('/auth/login', {
     method: 'POST',
-    body: { phone, password },
+    body: { ...identifier, password },
+  });
+
+export type OAuthProvider = 'google' | 'facebook';
+
+// Only logs into an existing account (the one whose profile has this email attached) —
+// same rule as email-based OTP login, see authController.oauthLogin.
+export const oauthLogin = (provider: OAuthProvider, token: string) =>
+  request<{ success: true; user: BackendUser; isNewUser: false } & TokenPair>('/auth/oauth', {
+    method: 'POST',
+    body: { provider, token },
+  });
+
+// Creates a new account directly from a verified Google/Facebook profile — no OTP round-trip,
+// see authController.oauthRegister. Phone is required but NOT verified at this step.
+export const oauthRegister = (provider: OAuthProvider, token: string, phone: string, accountType: AccountType) =>
+  request<{ success: true; user: BackendUser; isNewUser: true } & TokenPair>('/auth/oauth-register', {
+    method: 'POST',
+    body: { provider, token, phone, accountType, termsAccepted: true },
   });
 
 export const getProfile = (accessToken: string) =>

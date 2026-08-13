@@ -47,6 +47,9 @@ module.exports = {
       checkAutomatically: 'NEVER',
       fallbackToCacheTimeout: 0,
     },
+    extra: {
+      googleWebClientId: process.env.GOOGLE_WEB_CLIENT_ID || '',
+    },
     plugins: [
       [
         'expo-location',
@@ -77,6 +80,31 @@ module.exports = {
           color: '#F45B18',
         },
       ],
-    ],
+      [
+        '@react-native-google-signin/google-signin',
+        {
+          // The plugin requires a validly-formatted scheme to run at all, even for an
+          // Android-only build (it only ever touches iOS's Info.plist). This placeholder is
+          // harmless until real iOS credentials replace GOOGLE_IOS_URL_SCHEME in .env.
+          iosUrlScheme: process.env.GOOGLE_IOS_URL_SCHEME || 'com.googleusercontent.apps.placeholder',
+        },
+      ],
+      // Facebook Login is skipped for now — the fbsdk-next plugin needs a real FACEBOOK_APP_ID
+      // to be safe to bake into a native build (an empty/placeholder ID crashes the app on
+      // launch since the SDK auto-initializes). Set FACEBOOK_APP_ID + FACEBOOK_CLIENT_TOKEN in
+      // .env and this activates itself on the next prebuild — no code change needed.
+      process.env.FACEBOOK_APP_ID && [
+        'react-native-fbsdk-next',
+        {
+          appID: process.env.FACEBOOK_APP_ID,
+          clientToken: process.env.FACEBOOK_CLIENT_TOKEN || '',
+          displayName: 'AnyWork',
+          scheme: `fb${process.env.FACEBOOK_APP_ID}`,
+          isAutoInitEnabled: true,
+          advertiserIDCollectionEnabled: false,
+          autoLogAppEventsEnabled: false,
+        },
+      ],
+    ].filter(Boolean),
   },
 };

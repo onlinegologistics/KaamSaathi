@@ -8,8 +8,12 @@ import {
   BackendUser,
   BackendNotification,
   TokenPair,
+  AuthIdentifier,
   listCategories as apiListCategories,
   loginWithPassword as apiLoginWithPassword,
+  oauthLogin as apiOauthLogin,
+  oauthRegister as apiOauthRegister,
+  OAuthProvider,
   sendOtp as apiSendOtp,
   toCategoryMeta,
   verifyOtp as apiVerifyOtp,
@@ -26,6 +30,7 @@ import {
   markAllNotificationsRead as apiMarkAllNotificationsRead,
   setAuthTokens,
   setAuthHandlers,
+  getAuthTokens,
 } from '../services/api';
 import { categories as fallbackCategories, categoryGroups as fallbackCategoryGroups } from '../data/categories';
 import { RemoteSettings, fetchRemoteSettings } from '../services/settings';
@@ -68,6 +73,8 @@ if (Notifications) {
 }
 
 export type UserMode = 'worker' | 'employer';
+
+const TOKENS_STORAGE_KEY = 'kaamsaathi_tokens';
 
 type ProfilePayload = {
   name: string;
@@ -150,13 +157,18 @@ interface AppContextValue {
   setMode: (mode: UserMode) => void;
 
   isAuthenticated: boolean;
+  isBootstrapping: boolean;
   needsRegistration: boolean;
   currentUser: User | null;
-  phoneNumber: string;
+  /** The phone number or email the current OTP flow (send/resend/verify) is for. */
+  authIdentifierValue: string;
+  authIdentifierType: 'phone' | 'email';
   accessToken: string | null;
 
-  loginWithPassword: (phone: string, password: string) => Promise<void>;
-  requestOtp: (phone: string) => Promise<{ demoOtp: string }>;
+  loginWithPassword: (identifier: AuthIdentifier, password: string) => Promise<void>;
+  loginWithOAuth: (provider: OAuthProvider, token: string) => Promise<void>;
+  registerWithOAuth: (provider: OAuthProvider, token: string, phone: string, accountType: AccountType) => Promise<void>;
+  requestOtp: (identifier: AuthIdentifier) => Promise<{ demoOtp: string }>;
   startRegistration: (phone: string, profile: ProfilePayload) => Promise<{ demoOtp: string }>;
   confirmOtp: (otp: string) => Promise<void>;
   updateProfile: (profile: ProfilePayload) => Promise<void>;
@@ -198,9 +210,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [language, setLanguageState] = useState<Language>('en');
   const [mode, setMode] = useState<UserMode>('worker');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // True only until the stored-session restore attempt (below) finishes — RootNavigator
+  // holds on a splash screen for this rather than flashing the login screen on every cold
+  // start before flipping to Main once a saved session turns out to still be valid.
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [needsRegistration, setNeedsRegistration] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [authIdentifierValue, setAuthIdentifierValue] = useState('');
+  const [authIdentifierType, setAuthIdentifierType] = useState<'phone' | 'email'>('phone');
   const [tokens, setTokens] = useState<TokenPair | null>(null);
   const [pendingRegistrationProfile, setPendingRegistrationProfile] = useState<ProfilePayload | null>(null);
   const [bookmarkedJobIds, setBookmarkedJobIds] = useState<string[]>([]);
@@ -240,10 +257,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [language]
   );
 
-  const loginWithPassword = useCallback(async (phone: string, password: string) => {
-    setPhoneNumber(phone);
+  const loginWithPassword = useCallback(async (identifier: AuthIdentifier, password: string) => {
+    setAuthIdentifierValue(identifier.phone ?? identifier.email ?? '');
+    setAuthIdentifierType(identifier.email ? 'email' : 'phone');
     setPendingRegistrationProfile(null);
-    const res = await apiLoginWithPassword(phone, password);
+    const res = await apiLoginWithPassword(identifier, password);
     setTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
     const user = toUser(res.user);
     setCurrentUser(user);
@@ -258,17 +276,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setWelcome({ name: user.name, isNewUser: false });
   }, []);
 
-  const requestOtp = useCallback(async (phone: string) => {
-    setPhoneNumber(phone);
+  const loginWithOAuth = useCallback(async (provider: OAuthProvider, token: string) => {
     setPendingRegistrationProfile(null);
-    const res = await apiSendOtp(phone, 'login');
+    const res = await apiOauthLogin(provider, token);
+    setAuthIdentifierValue(res.user.email || '');
+    setAuthIdentifierType('email');
+    setTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
+    const user = toUser(res.user);
+    setCurrentUser(user);
+    try {
+      connectSocket(res.accessToken);
+    } catch {
+      // Chat is secondary; OAuth login should not depend on socket connection.
+    }
+    setNeedsRegistration(false);
+    setIsAuthenticated(true);
+    setAnnouncementSeen(false);
+    setWelcome({ name: user.name, isNewUser: false });
+  }, []);
+
+  const registerWithOAuth = useCallback(async (provider: OAuthProvider, token: string, phone: string, accountType: AccountType) => {
+    setPendingRegistrationProfile(null);
+    const res = await apiOauthRegister(provider, token, phone, accountType);
+    setAuthIdentifierValue(phone);
+    setAuthIdentifierType('phone');
+    setTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
+    const user = toUser(res.user);
+    setCurrentUser(user);
+    try {
+      connectSocket(res.accessToken);
+    } catch {
+      // Chat is secondary; OAuth registration should not depend on socket connection.
+    }
+    setNeedsRegistration(false);
+    setIsAuthenticated(true);
+    setAnnouncementSeen(false);
+    setWelcome({ name: user.name, isNewUser: true });
+  }, []);
+
+  const requestOtp = useCallback(async (identifier: AuthIdentifier) => {
+    setAuthIdentifierValue(identifier.phone ?? identifier.email ?? '');
+    setAuthIdentifierType(identifier.email ? 'email' : 'phone');
+    setPendingRegistrationProfile(null);
+    const res = await apiSendOtp(identifier, 'login');
     return { demoOtp: res.otp };
   }, []);
 
   const startRegistration = useCallback(async (phone: string, profile: ProfilePayload) => {
-    setPhoneNumber(phone);
+    setAuthIdentifierValue(phone);
+    setAuthIdentifierType('phone');
     setPendingRegistrationProfile(profile);
-    const res = await apiSendOtp(phone, 'register');
+    const res = await apiSendOtp({ phone }, 'register');
     return { demoOtp: res.otp };
   }, []);
 
@@ -276,7 +334,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (otp: string) => {
       const isNewUser = !!pendingRegistrationProfile;
       const intent = isNewUser ? 'register' : 'login';
-      const res = await apiVerifyOtp(phoneNumber, otp, intent);
+      const identifier: AuthIdentifier =
+        authIdentifierType === 'email' ? { email: authIdentifierValue } : { phone: authIdentifierValue };
+      const res = await apiVerifyOtp(identifier, otp, intent);
       setTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
 
       let user = toUser(res.user);
@@ -300,7 +360,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Read from `user` rather than state — setCurrentUser hasn't flushed yet.
       setWelcome({ name: user.name, isNewUser });
     },
-    [phoneNumber, pendingRegistrationProfile]
+    [authIdentifierValue, authIdentifierType, pendingRegistrationProfile]
   );
 
   const updateProfile = useCallback(
@@ -432,7 +492,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsAuthenticated(false);
     setNeedsRegistration(false);
     setCurrentUser(null);
-    setPhoneNumber('');
+    setAuthIdentifierValue('');
     setTokens(null);
     setPendingRegistrationProfile(null);
     setAnnouncementSeen(true);
@@ -451,6 +511,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       onAuthExpired: () => logout(),
     });
   }, [logout]);
+
+  // Persists whatever's needed to skip the login screen on the next cold start. Guarded on
+  // isBootstrapping so this can't fire with the initial `tokens=null` and wipe out a
+  // still-unread saved session before the restore effect below gets a chance to read it.
+  useEffect(() => {
+    if (isBootstrapping) return;
+    if (tokens) {
+      AsyncStorage.setItem(TOKENS_STORAGE_KEY, JSON.stringify(tokens)).catch(() => {});
+    } else {
+      AsyncStorage.removeItem(TOKENS_STORAGE_KEY).catch(() => {});
+    }
+  }, [tokens, isBootstrapping]);
+
+  // Runs once on mount: if a session was saved from a previous app launch, restore it
+  // instead of forcing the user to log in again every time the app is closed and reopened.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const stored = await AsyncStorage.getItem(TOKENS_STORAGE_KEY);
+        if (!stored || cancelled) return;
+        const parsed = JSON.parse(stored) as TokenPair;
+        setAuthTokens(parsed);
+
+        const res = await apiGetProfile(parsed.accessToken);
+        if (cancelled) return;
+
+        // request() may have silently rotated the token pair mid-call (see
+        // refreshAccessToken in api.ts) if the saved access token had expired while the
+        // app was closed — read back whichever pair is now authoritative, not the
+        // possibly-stale one we started with.
+        setTokens(getAuthTokens() ?? parsed);
+        setCurrentUser(toUser(res.user));
+        try {
+          connectSocket((getAuthTokens() ?? parsed).accessToken);
+        } catch {
+          // Chat is secondary; restoring a session should not depend on socket connection.
+        }
+        setIsAuthenticated(true);
+      } catch {
+        // Nothing restorable (never logged in, or the refresh token itself has expired) —
+        // clear anything stale so we don't keep retrying it on every future launch.
+        setAuthTokens(null);
+        await AsyncStorage.removeItem(TOKENS_STORAGE_KEY).catch(() => {});
+      } finally {
+        if (!cancelled) setIsBootstrapping(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const dismissAnnouncement = useCallback(() => {
     setAnnouncementSeen(true);
@@ -514,11 +627,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       mode,
       setMode,
       isAuthenticated,
+      isBootstrapping,
       needsRegistration,
       currentUser,
-      phoneNumber,
+      authIdentifierValue,
+      authIdentifierType,
       accessToken: tokens?.accessToken ?? null,
       loginWithPassword,
+      loginWithOAuth,
+      registerWithOAuth,
       requestOtp,
       startRegistration,
       confirmOtp,
@@ -554,11 +671,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       t,
       mode,
       isAuthenticated,
+      isBootstrapping,
       needsRegistration,
       currentUser,
-      phoneNumber,
+      authIdentifierValue,
+      authIdentifierType,
       tokens,
       loginWithPassword,
+      loginWithOAuth,
+      registerWithOAuth,
       requestOtp,
       startRegistration,
       confirmOtp,

@@ -77,20 +77,28 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           GOOGLE_MAPS_SERVER_API_KEY: ${{ secrets.GOOGLE_MAPS_SERVER_API_KEY }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+          FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID }}
+          FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || '22' }}
-          envs: GOOGLE_MAPS_SERVER_API_KEY
+          envs: GOOGLE_MAPS_SERVER_API_KEY,GOOGLE_WEB_CLIENT_ID,FACEBOOK_APP_ID,FACEBOOK_APP_SECRET
           script: |
             mkdir -p /var/www/kaamsaathi
             cd /var/www/kaamsaathi
-            # Refresh just this key so any other vars already in .env survive.
+            # Refresh just these keys so any other vars already in .env survive.
             touch .env
-            grep -v '^GOOGLE_MAPS_SERVER_API_KEY=' .env > .env.tmp || true
-            echo "GOOGLE_MAPS_SERVER_API_KEY=$GOOGLE_MAPS_SERVER_API_KEY" >> .env.tmp
+            grep -vE '^(GOOGLE_MAPS_SERVER_API_KEY|GOOGLE_WEB_CLIENT_ID|FACEBOOK_APP_ID|FACEBOOK_APP_SECRET)=' .env > .env.tmp || true
+            {
+              echo "GOOGLE_MAPS_SERVER_API_KEY=$GOOGLE_MAPS_SERVER_API_KEY"
+              echo "GOOGLE_WEB_CLIENT_ID=$GOOGLE_WEB_CLIENT_ID"
+              echo "FACEBOOK_APP_ID=$FACEBOOK_APP_ID"
+              echo "FACEBOOK_APP_SECRET=$FACEBOOK_APP_SECRET"
+            } >> .env.tmp
             mv .env.tmp .env
             chmod 600 .env
             docker compose pull

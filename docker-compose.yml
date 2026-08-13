@@ -29,6 +29,11 @@ services:
       # workflow into /var/www/kaamsaathi/.env from the GitHub secret of the
       # same name — never committed to the repo.
       - GOOGLE_MAPS_SERVER_API_KEY=${GOOGLE_MAPS_SERVER_API_KEY:-}
+      # Google/Facebook OAuth login (see authController.js oauthLogin/oauthRegister).
+      # Same injection pattern as GOOGLE_MAPS_SERVER_API_KEY above.
+      - GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID:-}
+      - FACEBOOK_APP_ID=${FACEBOOK_APP_ID:-}
+      - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET:-}
     networks:
       - kaamsaathi-net
 
